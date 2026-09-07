@@ -39,6 +39,13 @@ import RelayUI
 presence dots, unread badges, typing indicators, read receipts, optimistic sends with retry,
 edit/delete, replies, image and audio messages, and a reconnecting banner.
 
+## Security
+
+The SDK sends `X-App-Bundle-Id` (from `Bundle.main.bundleIdentifier`) on every REST call and on
+the gateway connection automatically — no configuration needed. If the project has an iOS bundle
+ID allowlist configured (in the admin panel or via `PATCH /projects/me/settings`), a request from
+an app whose bundle ID isn't on that list is rejected; an empty allowlist leaves it unrestricted.
+
 ## Calling
 
 ```swift

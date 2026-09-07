@@ -26,6 +26,12 @@ public final class RelayAPI: Sendable {
         request.httpMethod = method
         request.setValue(config.publicKey, forHTTPHeaderField: "X-Relay-Key")
         request.setValue("Bearer \(try await tokens.get())", forHTTPHeaderField: "Authorization")
+        // Lets the service enforce an optional per-project app allowlist (PATCH
+        // /projects/me/settings' iosBundleIds) — a public key copied into an unregistered app is
+        // then rejected. Always sent; the service only checks it when that allowlist is non-empty.
+        if let bundleId = Bundle.main.bundleIdentifier {
+            request.setValue(bundleId, forHTTPHeaderField: "X-App-Bundle-Id")
+        }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try RelayJSON.encoder.encode(body)

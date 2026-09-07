@@ -76,7 +76,14 @@ final class RelaySocket {
             guard self.wantOpen else { return }
             var components = URLComponents(url: self.config.gatewayURL, resolvingAgainstBaseURL: false)!
             components.queryItems = [URLQueryItem(name: "key", value: self.config.publicKey), URLQueryItem(name: "token", value: token)]
-            let task = self.session.webSocketTask(with: components.url!)
+            var request = URLRequest(url: components.url!)
+            // Same app-allowlist header as RelayAPI's REST calls (X-App-Bundle-Id) — the gateway
+            // upgrade enforces it too, via a URLRequest since webSocketTask(with: URL) can't carry
+            // custom headers.
+            if let bundleId = Bundle.main.bundleIdentifier {
+                request.setValue(bundleId, forHTTPHeaderField: "X-App-Bundle-Id")
+            }
+            let task = self.session.webSocketTask(with: request)
             self.task = task
             task.resume()
             self.awaitOpen(task)
