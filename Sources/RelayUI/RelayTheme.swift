@@ -71,6 +71,22 @@ public enum RelayFormat {
         return rel == "now" ? "Last seen just now" : "Last seen \(rel)\(rel.last.map { "mhd".contains($0) } == true ? " ago" : "")"
     }
 
+    /// First http(s) URL in a message body — decides which link gets the preview card under the
+    /// bubble. Bare domains ("google.com") deliberately don't count, same rule on web/Android so a
+    /// message previews identically everywhere.
+    public static func firstUrl(in text: String) -> String? {
+        guard let range = text.range(of: #"https?://[^\s<>"')\]]+"#, options: .regularExpression) else { return nil }
+        var url = String(text[range])
+        while let last = url.last, ".,;:!?".contains(last) { url.removeLast() } // trailing punctuation isn't part of the link
+        return url.isEmpty ? nil : url
+    }
+
+    public static func fileSize(_ bytes: Int) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.0f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+
     public static func initials(_ name: String?) -> String {
         guard let name, !name.isEmpty else { return "?" }
         let parts = name.split(separator: " ")

@@ -48,10 +48,14 @@ enum CallEvent {
     case offer(callId: String, senderId: UserId, sdp: SDPPayload)
     case answerSDP(callId: String, sdp: SDPPayload)
     case ice(callId: String, candidate: ICECandidatePayload)
+    // Only the field that changed is present — the other is nil, not false. See handle(_:) for
+    // why each side must be applied independently.
+    case mediaState(callId: String, cameraEnabled: Bool?, micEnabled: Bool?)
 
     private struct Raw: Decodable {
         let event: String; let callId: String?; let conversationId: String?; let callerId: String?; let callerName: String?
         let type: String?; let acceptedBy: String?; let reason: String?; let senderId: String?; let sdp: SDPPayload?; let candidate: ICECandidatePayload?
+        let cameraEnabled: Bool?; let micEnabled: Bool?
     }
 
     static func decode(_ data: Data) -> CallEvent? {
@@ -68,6 +72,7 @@ enum CallEvent {
         case "call_offer": guard let c = r.callId, let s = r.senderId, let sdp = r.sdp else { return nil }; return .offer(callId: c, senderId: s, sdp: sdp)
         case "call_answer_sdp": guard let c = r.callId, let sdp = r.sdp else { return nil }; return .answerSDP(callId: c, sdp: sdp)
         case "call_ice_candidate": guard let c = r.callId, let cand = r.candidate else { return nil }; return .ice(callId: c, candidate: cand)
+        case "call_media_state": guard let c = r.callId else { return nil }; return .mediaState(callId: c, cameraEnabled: r.cameraEnabled, micEnabled: r.micEnabled)
         default: return nil
         }
     }

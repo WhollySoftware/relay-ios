@@ -280,6 +280,8 @@ public final class ChatStore {
         let optimistic = Message(
             id: "pending:\(clientId)", conversationId: id, senderId: meId ?? "", body: input.body ?? "", createdAt: Date(),
             imageUrl: input.imageUrl, audioUrl: input.audioUrl, audioDurationSec: input.audioDurationSec,
+            fileUrl: input.fileUrl, fileName: input.fileName, fileSizeBytes: input.fileSizeBytes,
+            fileThumbnailUrl: input.fileThumbnailUrl, fileDurationSec: input.fileDurationSec,
             replyTo: replyTarget.map { ReplyPreview(id: $0.id, senderId: $0.senderId, body: $0.body, deleted: $0.deleted) },
             clientId: clientId, status: .sending
         )
@@ -314,7 +316,9 @@ public final class ChatStore {
         setThread(id) { $0.messages.removeAll { $0.clientId == clientId } }
         return try await sendMessage(id, SendMessageInput(
             body: failed.body.isEmpty ? nil : failed.body, imageUrl: failed.imageUrl, audioUrl: failed.audioUrl,
-            audioDurationSec: failed.audioDurationSec, replyToId: failed.replyTo?.id, clientId: clientId))
+            audioDurationSec: failed.audioDurationSec, fileUrl: failed.fileUrl, fileName: failed.fileName,
+            fileSizeBytes: failed.fileSizeBytes, fileThumbnailUrl: failed.fileThumbnailUrl, fileDurationSec: failed.fileDurationSec,
+            replyToId: failed.replyTo?.id, clientId: clientId))
     }
 
     public func discardMessage(_ id: ConversationId, clientId: String) {
@@ -395,6 +399,8 @@ public final class ChatStore {
         case .deleted: body = ""
         case .image: body = "📷 Photo"
         case .audio: body = "🎤 Voice message"
+        case .video: body = "🎬 Video"
+        case .file: body = "📎 \(m.fileName ?? "File")"
         case .text: body = m.body
         }
         return MessagePreview(id: m.id, senderId: m.senderId, kind: kind, body: body, createdAt: m.createdAt)

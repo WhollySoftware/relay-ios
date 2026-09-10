@@ -32,7 +32,7 @@ public struct GroupMember: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
-public enum MessageKind: String, Codable, Sendable { case text, image, audio, deleted }
+public enum MessageKind: String, Codable, Sendable { case text, image, audio, file, video, deleted }
 
 public struct MessagePreview: Codable, Sendable, Equatable {
     public let id: MessageId
@@ -101,6 +101,15 @@ public struct Message: Codable, Sendable, Equatable, Identifiable {
     public var imageUrl: String?
     public var audioUrl: String?
     public var audioDurationSec: Int?
+    /// A generic attachment (document, video, anything from a file picker) — mutually exclusive with imageUrl/audioUrl.
+    public var fileUrl: String?
+    public var fileName: String?
+    /// Inferred server-side for a data: fileUrl; nil for an http(s) one unless the sender declared it.
+    public var fileMime: String?
+    public var fileSizeBytes: Int?
+    /// A client-extracted preview frame — only ever set for a video fileUrl.
+    public var fileThumbnailUrl: String?
+    public var fileDurationSec: Int?
     public var replyTo: ReplyPreview?
     /// Client-generated id for optimistic sends; echoed by the server.
     public var clientId: String?
@@ -111,11 +120,16 @@ public struct Message: Codable, Sendable, Equatable, Identifiable {
 
     public init(id: MessageId, conversationId: ConversationId, senderId: UserId, body: String, createdAt: Date,
                 editedAt: Date? = nil, deleted: Bool = false, imageUrl: String? = nil, audioUrl: String? = nil,
-                audioDurationSec: Int? = nil, replyTo: ReplyPreview? = nil, clientId: String? = nil,
+                audioDurationSec: Int? = nil, fileUrl: String? = nil, fileName: String? = nil, fileMime: String? = nil,
+                fileSizeBytes: Int? = nil, fileThumbnailUrl: String? = nil, fileDurationSec: Int? = nil,
+                replyTo: ReplyPreview? = nil, clientId: String? = nil,
                 status: MessageStatus? = nil, error: String? = nil) {
         self.id = id; self.conversationId = conversationId; self.senderId = senderId; self.body = body
         self.createdAt = createdAt; self.editedAt = editedAt; self.deleted = deleted; self.imageUrl = imageUrl
-        self.audioUrl = audioUrl; self.audioDurationSec = audioDurationSec; self.replyTo = replyTo
+        self.audioUrl = audioUrl; self.audioDurationSec = audioDurationSec
+        self.fileUrl = fileUrl; self.fileName = fileName; self.fileMime = fileMime; self.fileSizeBytes = fileSizeBytes
+        self.fileThumbnailUrl = fileThumbnailUrl; self.fileDurationSec = fileDurationSec
+        self.replyTo = replyTo
         self.clientId = clientId; self.status = status; self.error = error
     }
 
@@ -124,6 +138,7 @@ public struct Message: Codable, Sendable, Equatable, Identifiable {
         if deleted { return .deleted }
         if imageUrl != nil && body.isEmpty { return .image }
         if audioUrl != nil && body.isEmpty { return .audio }
+        if fileUrl != nil && body.isEmpty { return (fileMime ?? "").hasPrefix("video/") ? .video : .file }
         return .text
     }
 }
@@ -135,13 +150,25 @@ public struct SendMessageInput: Sendable, Equatable {
     /// http(s) URL, or an audio data URL under 6MB.
     public var audioUrl: String?
     public var audioDurationSec: Int?
+    /// A generic attachment — http(s) URL, or a data URL under 14MB. Requires fileName.
+    public var fileUrl: String?
+    public var fileName: String?
+    /// Only used for an http(s) fileUrl — a data: fileUrl's size is computed server-side.
+    public var fileSizeBytes: Int?
+    /// A client-extracted preview frame for a video fileUrl — http(s) URL, or an image data URL under 400KB.
+    public var fileThumbnailUrl: String?
+    public var fileDurationSec: Int?
     public var replyToId: MessageId?
     /// Supply your own to correlate; generated otherwise.
     public var clientId: String?
 
     public init(body: String? = nil, imageUrl: String? = nil, audioUrl: String? = nil, audioDurationSec: Int? = nil,
+                fileUrl: String? = nil, fileName: String? = nil, fileSizeBytes: Int? = nil,
+                fileThumbnailUrl: String? = nil, fileDurationSec: Int? = nil,
                 replyToId: MessageId? = nil, clientId: String? = nil) {
         self.body = body; self.imageUrl = imageUrl; self.audioUrl = audioUrl; self.audioDurationSec = audioDurationSec
+        self.fileUrl = fileUrl; self.fileName = fileName; self.fileSizeBytes = fileSizeBytes
+        self.fileThumbnailUrl = fileThumbnailUrl; self.fileDurationSec = fileDurationSec
         self.replyToId = replyToId; self.clientId = clientId
     }
 }
@@ -165,6 +192,17 @@ public struct ReadReceipt: Codable, Sendable, Equatable {
 public struct MessagesPage: Codable, Sendable {
     public let messages: [Message]
     public let hasMore: Bool
+}
+
+/// Open Graph metadata for a URL found in a message — enough to render a WhatsApp/social-app-style
+/// preview card under the bubble. Fetched server-side via RelayAPI.linkPreview; nil fields mean the
+/// page didn't declare that piece of metadata.
+public struct LinkPreview: Codable, Sendable, Equatable {
+    public let url: String
+    public let title: String?
+    public let description: String?
+    public let imageUrl: String?
+    public let siteName: String?
 }
 
 public struct PresenceInfo: Sendable, Equatable {

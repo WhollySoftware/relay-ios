@@ -46,6 +46,26 @@ the gateway connection automatically — no configuration needed. If the project
 ID allowlist configured (in the admin panel or via `PATCH /projects/me/settings`), a request from
 an app whose bundle ID isn't on that list is rejected; an empty allowlist leaves it unrestricted.
 
+## Attachments
+
+`MessageComposerView` includes an attach button (Camera / Photo Library / File) alongside the
+text field. Photo Library (`PhotosPicker`) and File (`.fileImporter`) need **no permission at
+all** — both are out-of-process pickers, so this SDK never gets broader photo-library or
+file-system access than the one item the user picked. **Camera is the one exception**: add
+`NSCameraUsageDescription` to your app's Info.plist (the same key `RelayCall` already needs for
+video calls, so an app with calling already has it) — without it, iOS kills the app the moment
+Camera is tapped rather than showing a permission prompt. A video pick/capture gets a small
+client-extracted thumbnail automatically; this SDK never decodes video server-side either.
+
+## Link previews
+
+A message whose body contains an `http(s)://` URL automatically gets a social-app-style preview
+card (image, title, description, site name) under the bubble — and the same card appears above
+`MessageComposerView`'s text field, live, the moment a link is typed or pasted into the draft,
+before it's even sent. No setup needed: the metadata is fetched and cached server-side (`GET
+/link-preview`), so this view never talks to the linked site directly. A link with no usable Open
+Graph metadata (or that fails to load) renders no card at all — never an empty placeholder.
+
 ## Calling
 
 ```swift

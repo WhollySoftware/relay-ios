@@ -36,6 +36,11 @@ public final class CallCenter: NSObject {
     public private(set) var micEnabled = true
     public private(set) var cameraEnabled = true
     public private(set) var speakerEnabled = false
+    /// The PEER's reported mic/camera state (call_media_state) — a disabled camera still sends
+    /// frames (all black), so the UI uses this rather than "is there a remote track" to decide
+    /// when to show the peer's avatar instead of a black rectangle.
+    public private(set) var remoteMicEnabled = true
+    public private(set) var remoteCameraEnabled = true
     public var errorMessage: String?
     /// Shown by CallKit for outgoing calls and as a fallback name; set your app's display name.
     public var localizedAppName = "Call"
@@ -45,7 +50,9 @@ public final class CallCenter: NSObject {
     private var pendingOffer: (callId: String, sdp: SDPPayload)?
     private var pendingCandidates: [(callId: String, candidate: ICECandidatePayload)] = []
     private var pendingAcceptRecipient: UserId?
-    private var answeringCallId: String?
+    // internal (not private) so RelayPush.swift's cancel-push handler can exclude the call this
+    // device is itself in the middle of answering — see its guard for why that matters.
+    var answeringCallId: String?
     private var isStarting = false
     private var ringTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
@@ -97,6 +104,11 @@ public final class CallCenter: NSObject {
         Task {
             defer { isStarting = false }
             do {
+                // Otherwise the caller sits at "Calling…" while the callee's side connects, times
+                // out, and hangs up on a peer that never heard a thing over the socket — the
+                // offer/ICE exchange rides the gateway, not this REST call. Idempotent/instant
+                // when already connected.
+                _ = try? await client.connect()
                 let res = try await client.api.startCall(conversationId: conversation.id, type: type)
                 let uuid = UUID()
                 call = ActiveCall(id: res.callId, uuid: uuid, conversationId: conversation.id, peerId: peer.userId, peerName: peer.displayName, type: type, phase: .outgoing)
@@ -160,6 +172,13 @@ public final class CallCenter: NSObject {
             defer { if answeringCallId == callId { answeringCallId = nil } }
             var manager: PeerConnectionManager?
             do {
+                // Must happen before the REST answer call below — answering immediately prompts
+                // the caller to start sending its SDP offer + ICE candidates over the socket, and
+                // if this device was woken from a fully backgrounded/locked state via VoIP push,
+                // its own socket hasn't necessarily reconnected yet. Without this, that race can
+                // lose the entire signaling exchange to a gateway channel we weren't subscribed
+                // to. Idempotent/instant when already connected.
+                _ = try? await client.connect()
                 try await client.api.answerCall(callId)
                 guard var live = call, live.uuid == uuid else { return }
                 live.phase = .connecting
@@ -217,8 +236,14 @@ public final class CallCenter: NSObject {
         cleanup()
     }
 
-    public func toggleMic() { micEnabled.toggle(); manager?.setMicEnabled(micEnabled) }
-    public func toggleCamera() { cameraEnabled.toggle(); manager?.setCameraEnabled(cameraEnabled) }
+    public func toggleMic() {
+        micEnabled.toggle(); manager?.setMicEnabled(micEnabled)
+        if let call { send(["event": "call_media_state", "callId": call.id, "micEnabled": micEnabled]) }
+    }
+    public func toggleCamera() {
+        cameraEnabled.toggle(); manager?.setCameraEnabled(cameraEnabled)
+        if let call { send(["event": "call_media_state", "callId": call.id, "cameraEnabled": cameraEnabled]) }
+    }
     public func toggleSpeaker() { speakerEnabled.toggle(); PeerConnectionManager.setSpeaker(speakerEnabled) }
 
     // MARK: - Internals
@@ -335,6 +360,7 @@ public final class CallCenter: NSObject {
         pendingOffer = nil; pendingCandidates = []; pendingAcceptRecipient = nil; answeringCallId = nil
         call = nil; localVideoTrack = nil; remoteVideoTrack = nil
         micEnabled = true; cameraEnabled = true; speakerEnabled = false
+        remoteMicEnabled = true; remoteCameraEnabled = true
     }
 
     private func handle(_ event: CallEvent) {
@@ -366,6 +392,13 @@ public final class CallCenter: NSObject {
         case .declined(let callId), .missed(let callId), .ended(let callId, _):
             guard call?.id == callId else { return }
             finish(failed: false)
+        case .mediaState(let callId, let cam, let mic):
+            guard call?.id == callId else { return }
+            // Each toggle sends only the ONE field that changed — the other is nil on this event,
+            // not false — so each side is applied independently or a mic-only update would wrongly
+            // stomp remoteCameraEnabled (or vice versa).
+            if let cam { remoteCameraEnabled = cam }
+            if let mic { remoteMicEnabled = mic }
         }
     }
 

@@ -65,10 +65,14 @@ public struct RelayCallView: View {
         }
     }
 
+    // A disabled remote camera still sends frames (all black), so the video-vs-avatar decision
+    // uses remoteCameraEnabled, not just "is there a remote track".
+    private var showRemoteVideo: Bool { call.type == .video && center.remoteVideoTrack != nil && center.remoteCameraEnabled }
+
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if call.type == .video, let remote = center.remoteVideoTrack {
+            if showRemoteVideo, let remote = center.remoteVideoTrack {
                 VideoRenderView(track: remote).ignoresSafeArea()
             } else {
                 VStack(spacing: 14) {
@@ -79,10 +83,40 @@ public struct RelayCallView: View {
                 }
             }
             VStack {
-                if call.type == .video, center.remoteVideoTrack != nil { statusView.padding(.top, 8) }
+                HStack {
+                    if !center.remoteMicEnabled {
+                        HStack(spacing: 5) {
+                            Image(systemName: "mic.slash.fill")
+                            Text("Muted").font(.caption).fontWeight(.semibold)
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(Capsule().fill(.black.opacity(0.45)))
+                        .padding(.leading)
+                    }
+                    Spacer()
+                }
+                if showRemoteVideo { statusView.padding(.top, 8) }
                 Spacer()
+                // The renderer stays mounted (not conditionally) when the camera is off, so its
+                // track assignment survives the toggle — only the overlay changes. Without this
+                // the box shows a stale black frame instead of your own avatar when you turn your
+                // camera off mid-call.
                 if call.type == .video, let local = center.localVideoTrack {
-                    HStack { Spacer(); VideoRenderView(track: local).frame(width: 100, height: 150).clipShape(RoundedRectangle(cornerRadius: 14)).padding() }
+                    HStack {
+                        Spacer()
+                        ZStack {
+                            VideoRenderView(track: local).opacity(center.cameraEnabled ? 1 : 0)
+                            if !center.cameraEnabled {
+                                VStack(spacing: 4) {
+                                    Circle().fill(Color.gray.opacity(0.5)).frame(width: 36, height: 36)
+                                        .overlay(Text(String((center.client.me?.displayName ?? "You").prefix(2)).uppercased()).font(.caption.bold()).foregroundStyle(.white))
+                                    Text(center.client.me?.displayName ?? "You").font(.caption2.bold()).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
+                                }
+                            }
+                        }
+                        .frame(width: 100, height: 150).background(Color(white: 0.12)).clipShape(RoundedRectangle(cornerRadius: 14)).padding()
+                    }
                 }
                 HStack(spacing: 24) {
                     control(center.micEnabled ? "mic.fill" : "mic.slash.fill", on: center.micEnabled) { center.toggleMic() }

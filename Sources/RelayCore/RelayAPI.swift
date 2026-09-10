@@ -141,7 +141,9 @@ public final class RelayAPI: Sendable {
 
     private struct MessageEnvelope: Decodable { let message: Message; let clientId: String? }
     private struct SendBody: Encodable {
-        let body: String?; let imageUrl: String?; let audioUrl: String?; let audioDurationSec: Int?; let replyToId: String?; let clientId: String?
+        let body: String?; let imageUrl: String?; let audioUrl: String?; let audioDurationSec: Int?
+        let fileUrl: String?; let fileName: String?; let fileSizeBytes: Int?; let fileThumbnailUrl: String?; let fileDurationSec: Int?
+        let replyToId: String?; let clientId: String?
     }
     private struct EditBody: Encodable { let body: String }
     public struct ReadResult: Decodable, Sendable { public let ok: Bool; public let lastReadAt: Date }
@@ -153,7 +155,9 @@ public final class RelayAPI: Sendable {
 
     public func sendMessage(in id: ConversationId, _ input: SendMessageInput) async throws -> Message {
         let body = SendBody(body: input.body, imageUrl: input.imageUrl, audioUrl: input.audioUrl,
-                            audioDurationSec: input.audioDurationSec, replyToId: input.replyToId, clientId: input.clientId)
+                            audioDurationSec: input.audioDurationSec, fileUrl: input.fileUrl, fileName: input.fileName,
+                            fileSizeBytes: input.fileSizeBytes, fileThumbnailUrl: input.fileThumbnailUrl, fileDurationSec: input.fileDurationSec,
+                            replyToId: input.replyToId, clientId: input.clientId)
         let env: MessageEnvelope = try await request("POST", "/conversations/\(id)/messages", body: body)
         var message = env.message
         message.clientId = env.clientId
@@ -174,6 +178,15 @@ public final class RelayAPI: Sendable {
 
     public func readReceipts(_ id: ConversationId) async throws -> [ReadReceipt] {
         (try await request("GET", "/conversations/\(id)/read-receipts") as ReceiptsEnvelope).receipts
+    }
+
+    private struct LinkPreviewEnvelope: Decodable { let preview: LinkPreview? }
+
+    /// OG metadata for a URL found in a message body, for a WhatsApp-style preview card. Server-
+    /// cached, so calling this repeatedly for the same URL across viewers is cheap. Returns nil
+    /// when the page has nothing usable (or is unreachable / not HTML / a private address).
+    public func linkPreview(url: String) async throws -> LinkPreview? {
+        (try await request("GET", "/link-preview", query: ["url": url]) as LinkPreviewEnvelope).preview
     }
 
     // MARK: - Presence

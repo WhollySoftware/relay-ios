@@ -1,4 +1,9 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#else
+import AppKit
+#endif
 
 /// One message bubble — text, image, audio (as a link), deleted placeholder, quoted reply,
 /// edited mark, optimistic states, and a context menu for reply/edit/delete.
@@ -14,12 +19,21 @@ public struct MessageBubbleView: View {
     var onDelete: ((Message) -> Void)?
     var onRetry: ((Message) -> Void)?
     var onDiscard: ((Message) -> Void)?
+    var onForward: ((Message) -> Void)?
 
     public init(message: Message, isOwn: Bool, senderName: String? = nil, continued: Bool = false, status: String? = nil,
                 onReply: ((Message) -> Void)? = nil, onEdit: ((Message) -> Void)? = nil, onDelete: ((Message) -> Void)? = nil,
-                onRetry: ((Message) -> Void)? = nil, onDiscard: ((Message) -> Void)? = nil) {
+                onRetry: ((Message) -> Void)? = nil, onDiscard: ((Message) -> Void)? = nil, onForward: ((Message) -> Void)? = nil) {
         self.message = message; self.isOwn = isOwn; self.senderName = senderName; self.continued = continued; self.status = status
         self.onReply = onReply; self.onEdit = onEdit; self.onDelete = onDelete; self.onRetry = onRetry; self.onDiscard = onDiscard
+        self.onForward = onForward
+    }
+
+    /// What "Share" hands to the system share sheet — the message text, or the attachment's URL
+    /// when there's no text (an image/file/audio message).
+    private var shareText: String {
+        if !message.body.isEmpty { return message.body }
+        return message.imageUrl ?? message.fileUrl ?? message.audioUrl ?? ""
     }
 
     public var body: some View {
@@ -32,8 +46,24 @@ public struct MessageBubbleView: View {
                 bubble
                     .contextMenu {
                         if !message.deleted && !message.isPending {
+                            if !message.body.isEmpty {
+                                Button {
+                                    #if os(iOS)
+                                    UIPasteboard.general.string = message.body
+                                    #else
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(message.body, forType: .string)
+                                    #endif
+                                } label: { Label("Copy", systemImage: "doc.on.doc") }
+                            }
                             if let onReply { Button { onReply(message) } label: { Label("Reply", systemImage: "arrowshape.turn.up.left") } }
-                            if isOwn, let onEdit, message.imageUrl == nil, message.audioUrl == nil { Button { onEdit(message) } label: { Label("Edit", systemImage: "pencil") } }
+                            if let onForward { Button { onForward(message) } label: { Label("Forward", systemImage: "arrowshape.turn.up.right") } }
+                            if !shareText.isEmpty, let url = URL(string: shareText) {
+                                ShareLink(item: url) { Label("Share", systemImage: "square.and.arrow.up") }
+                            } else if !shareText.isEmpty {
+                                ShareLink(item: shareText) { Label("Share", systemImage: "square.and.arrow.up") }
+                            }
+                            if isOwn, let onEdit, message.imageUrl == nil, message.audioUrl == nil, message.fileUrl == nil { Button { onEdit(message) } label: { Label("Edit", systemImage: "pencil") } }
                             if isOwn, let onDelete { Button(role: .destructive) { onDelete(message) } label: { Label("Delete", systemImage: "trash") } }
                         }
                     }
@@ -77,7 +107,47 @@ public struct MessageBubbleView: View {
                         Label(message.audioDurationSec.map { "Voice message · \($0 / 60):\(String(format: "%02d", $0 % 60))" } ?? "Voice message", systemImage: "waveform")
                     }
                 }
+                if let file = message.fileUrl, let url = URL(string: file) {
+                    let isVideo = (message.fileMime ?? "").hasPrefix("video/")
+                    Link(destination: url) {
+                        if isVideo {
+                            ZStack {
+                                if let thumb = message.fileThumbnailUrl, let thumbUrl = URL(string: thumb) {
+                                    AsyncImage(url: thumbUrl) { phase in
+                                        if let img = phase.image { img.resizable().scaledToFill() } else { Color.black.opacity(0.3) }
+                                    }
+                                } else {
+                                    Color.black.opacity(0.3)
+                                }
+                                Image(systemName: "play.circle.fill").font(.system(size: 32)).foregroundStyle(.white)
+                                if let sec = message.fileDurationSec {
+                                    VStack {
+                                        Spacer()
+                                        HStack {
+                                            Spacer()
+                                            Text("\(sec / 60):\(String(format: "%02d", sec % 60))").font(.caption2.bold()).foregroundStyle(.white)
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background(Capsule().fill(.black.opacity(0.55)))
+                                        }
+                                    }.padding(6)
+                                }
+                            }
+                            .frame(width: 220, height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            HStack(spacing: 8) {
+                                Image(systemName: "paperclip")
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(message.fileName ?? "File").font(.caption).lineLimit(1)
+                                    if let bytes = message.fileSizeBytes { Text(RelayFormat.fileSize(bytes)).font(.caption2).opacity(0.7) }
+                                }
+                            }
+                        }
+                    }
+                }
                 if !message.body.isEmpty { Text(message.body) }
+                if !message.isPending, let previewUrl = RelayFormat.firstUrl(in: message.body) {
+                    LinkPreviewCard(url: previewUrl, isOwn: isOwn)
+                }
             }
             HStack(spacing: 4) {
                 if message.editedAt != nil && !message.deleted { Text("edited").font(.caption2) }

@@ -9,6 +9,7 @@ public struct MessageThreadView: View {
     let conversationId: ConversationId
     @State private var replyTo: Message?
     @State private var editing: Message?
+    @State private var forwarding: Message?
 
     public init(conversationId: ConversationId) { self.conversationId = conversationId }
 
@@ -47,7 +48,8 @@ public struct MessageThreadView: View {
                                 onEdit: { editing = $0 },
                                 onDelete: { m in Task { try? await chat.deleteMessage(conversationId, messageId: m.id) } },
                                 onRetry: { m in if let cid = m.clientId { Task { try? await chat.retryMessage(conversationId, clientId: cid) } } },
-                                onDiscard: { m in if let cid = m.clientId { chat.discardMessage(conversationId, clientId: cid) } }
+                                onDiscard: { m in if let cid = m.clientId { chat.discardMessage(conversationId, clientId: cid) } },
+                                onForward: { forwarding = $0 }
                             )
                             .id(message.id)
                         }
@@ -90,6 +92,18 @@ public struct MessageThreadView: View {
         }
         .onDisappear {
             if chat.viewingConversationId == conversationId { chat.setViewing(nil) }
+        }
+        .sheet(item: $forwarding) { message in
+            ForwardPickerView(conversations: chat.conversations.filter { $0.id != conversationId }) { targetId in
+                forwarding = nil
+                Task {
+                    try? await chat.sendMessage(targetId, SendMessageInput(
+                        body: message.body.isEmpty ? nil : message.body, imageUrl: message.imageUrl, audioUrl: message.audioUrl,
+                        audioDurationSec: message.audioDurationSec, fileUrl: message.fileUrl, fileName: message.fileName,
+                        fileThumbnailUrl: message.fileThumbnailUrl, fileDurationSec: message.fileDurationSec
+                    ))
+                }
+            }
         }
     }
 

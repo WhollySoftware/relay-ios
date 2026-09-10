@@ -47,7 +47,12 @@ extension CallCenter {
             return .incomingCall(callId: callId)
         case "call_cancel":
             reportThrowawayCall()
-            guard let callId, let current = call, current.id == callId, current.phase == .incoming else { return .ignored }
+            // The service deliberately sends this same cancel push to every one of the callee's
+            // devices, including whichever one just answered (routes/calls.js's "answered
+            // elsewhere" cancel) — without the answeringCallId check, a cancel push arriving in
+            // the window between this device's own answer() call and the call actually reaching
+            // .connecting would tear down the very call it's in the middle of accepting.
+            guard let callId, let current = call, current.id == callId, current.phase == .incoming, answeringCallId != callId else { return .ignored }
             finish(failed: false)
             return .cancelled(callId: callId)
         default:
