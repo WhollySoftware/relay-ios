@@ -80,9 +80,18 @@ public struct MessageThreadView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .principal) {
-                VStack(spacing: 0) {
-                    Text(conversation?.title ?? "").font(.headline).lineLimit(1)
-                    Text(subtitle(conversation)).font(.caption2).foregroundStyle(theme.secondaryText)
+                HStack(spacing: 8) {
+                    if let conversation {
+                        ZStack(alignment: .bottomTrailing) {
+                            AvatarView(name: conversation.title, url: conversation.isGroup ? conversation.photoUrl : conversation.peer?.avatarUrl,
+                                       colorKey: conversation.isGroup ? "g:\(conversation.id)" : conversation.peer?.userId, size: 36)
+                            if !conversation.isGroup { PresenceDot(online: conversation.peer?.isOnline) }
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(conversation?.title ?? "").font(.headline).lineLimit(1)
+                        Text(subtitle(conversation)).font(.caption2).foregroundStyle(theme.secondaryText)
+                    }
                 }
             }
         }
@@ -113,15 +122,15 @@ public struct MessageThreadView: View {
         return RelayFormat.lastSeen(online: c.peer?.isOnline, lastSeenAt: c.peer?.lastSeenAt)
     }
 
-    /// "Seen" / "Seen by N" / "Sent" under the last own message.
-    private func status(for m: Message, at index: Int, in thread: ChatStore.Thread, conversation: Conversation?) -> String? {
+    /// Sent / seen receipt for the last own message — rendered as checkmark ticks, not text.
+    private func status(for m: Message, at index: Int, in thread: ChatStore.Thread, conversation: Conversation?) -> MessageReceiptStatus? {
         guard m.senderId == client.userId, m.status != .sending, m.status != .failed else { return nil }
         let isLastOwn = !thread.messages[(index + 1)...].contains { $0.senderId == client.userId }
         guard isLastOwn else { return nil }
         let receipts = client.chat.readReceipts[conversationId] ?? [:]
         let readers = receipts.filter { key, value in key != client.userId && (value ?? .distantPast) >= m.createdAt }.count
-        if readers == 0 { return "Sent" }
-        return conversation?.isGroup == true ? "Seen by \(readers)" : "Seen"
+        if readers == 0 { return .sent }
+        return .seen(by: conversation?.isGroup == true ? readers : nil)
     }
 }
 

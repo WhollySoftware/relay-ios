@@ -5,6 +5,9 @@ import RelayCore
 #if canImport(CallKit) && os(iOS)
 import CallKit
 #endif
+#if canImport(UserNotifications) && os(iOS)
+import UserNotifications
+#endif
 
 /// 1:1 call state machine — the DevBattel CallCoordinator with its later fixes, as an SDK:
 /// one call at a time, events validated against the current callId, ownership re-checked after
@@ -44,6 +47,23 @@ public final class CallCenter: NSObject {
     public var errorMessage: String?
     /// Shown by CallKit for outgoing calls and as a fallback name; set your app's display name.
     public var localizedAppName = "Call"
+    /// True once CallKit has been observed to reject a call on this device (the Simulator, or a
+    /// China-region build — Apple's App Store guidelines there disallow CallKit — or any other
+    /// device where `CX*` reporting errors out). Persisted to `UserDefaults` (key below) so this
+    /// discovery survives relaunches too — on a device where CallKit is structurally unavailable
+    /// (Simulator, China-region build) it will fail on every launch, and without persisting the
+    /// finding, the first real incoming call after every cold start would be sacrificed re-probing
+    /// a failure we already know about instead of just showing the banner. `RelayCallOverlay` shows
+    /// `IncomingCallBanner` on iOS when this is true.
+    // Stored (not computed) so @Observable tracks it and RelayCallOverlay re-renders the instant
+    // it flips — init() seeds it from UserDefaults and markCallKitUnavailable() keeps both in sync.
+    public private(set) var callKitUnavailable = false
+    private static let callKitUnavailableKey = "dev.relay.call.callKitUnavailable"
+    private func markCallKitUnavailable() {
+        guard !callKitUnavailable else { return }
+        callKitUnavailable = true
+        UserDefaults.standard.set(true, forKey: Self.callKitUnavailableKey)
+    }
 
     let client: RelayClient
     private var manager: PeerConnectionManager?
@@ -67,11 +87,19 @@ public final class CallCenter: NSObject {
     #if canImport(CallKit) && os(iOS)
     private let provider: CXProvider
     private let controller = CXCallController()
+    // Set right after `reportNewIncomingCall`/`CXStartCallAction` succeeds. A CXEndCallAction for
+    // that same call arriving within `Self.callKitProbeWindow` — before any human could plausibly
+    // have declined/hung up — means CallKit itself is silently killing a call it just accepted
+    // (observed on the Simulator; also expected on China-region builds, where CallKit is
+    // disallowed by App Store guidelines). That's the signal `callKitUnavailable` is watching for.
+    private var callKitReportedAt: (uuid: UUID, at: Date)?
+    private static let callKitProbeWindow: TimeInterval = 2.5
     #endif
 
     public init(client: RelayClient, supportsVideo: Bool = true) {
         self.client = client
         #if canImport(CallKit) && os(iOS)
+        callKitUnavailable = UserDefaults.standard.bool(forKey: Self.callKitUnavailableKey)
         let config = CXProviderConfiguration()
         config.supportsVideo = supportsVideo
         config.maximumCallGroups = 1
@@ -156,6 +184,12 @@ public final class CallCenter: NSObject {
     public func answer() {
         guard let current = call, current.phase == .incoming else { return }
         #if canImport(CallKit) && os(iOS)
+        guard !callKitUnavailable else {
+            PeerConnectionManager.configureAudioSession(video: current.type == .video)
+            PeerConnectionManager.activateAudioSessionWithoutCallKit()
+            performAnswer(uuid: current.uuid)
+            return
+        }
         controller.request(CXTransaction(action: CXAnswerCallAction(call: current.uuid))) { [weak self] error in
             if error != nil { Task { @MainActor in self?.performAnswer(uuid: current.uuid) } }
         }
@@ -222,6 +256,7 @@ public final class CallCenter: NSObject {
     public func hangUp() {
         guard let current = call else { return }
         #if canImport(CallKit) && os(iOS)
+        guard !callKitUnavailable else { performEnd(uuid: current.uuid); return }
         controller.request(CXTransaction(action: CXEndCallAction(call: current.uuid))) { [weak self] error in
             if error != nil { Task { @MainActor in self?.performEnd(uuid: current.uuid) } }
         }
@@ -406,38 +441,87 @@ public final class CallCenter: NSObject {
 
     private func reportIncoming(uuid: UUID, name: String, video: Bool) {
         #if canImport(CallKit) && os(iOS)
+        // Already known-unusable on this device/region: skip straight to the fallback instead of
+        // paying another round trip through CallKit to rediscover the same failure.
+        guard !callKitUnavailable else { notifyIncomingCallLocally(uuid: uuid, name: name, video: video); return }
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: name)
         update.localizedCallerName = name
         update.hasVideo = video
         update.supportsHolding = false; update.supportsGrouping = false; update.supportsUngrouping = false; update.supportsDTMF = false
         provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
-            if error != nil { Task { @MainActor in self?.finish(failed: true) } }
+            guard let self else { return }
+            Task { @MainActor in
+                guard error != nil else { self.callKitReportedAt = (uuid, Date()); return }
+                self.markCallKitUnavailable()
+                self.notifyIncomingCallLocally(uuid: uuid, name: name, video: video)
+            }
         }
         #endif
     }
     private func reportOutgoingStarted(uuid: UUID, name: String, video: Bool) {
         #if canImport(CallKit) && os(iOS)
+        guard !callKitUnavailable else {
+            PeerConnectionManager.configureAudioSession(video: video)
+            PeerConnectionManager.activateAudioSessionWithoutCallKit()
+            return
+        }
         let action = CXStartCallAction(call: uuid, handle: CXHandle(type: .generic, value: name))
         action.isVideo = video
-        controller.request(CXTransaction(action: action)) { _ in }
+        controller.request(CXTransaction(action: action)) { [weak self] error in
+            guard let self else { return }
+            Task { @MainActor in
+                guard error != nil else { self.callKitReportedAt = (uuid, Date()); return }
+                self.markCallKitUnavailable()
+                PeerConnectionManager.configureAudioSession(video: video)
+                PeerConnectionManager.activateAudioSessionWithoutCallKit()
+            }
+        }
         #endif
     }
     private func reportOutgoingConnecting(uuid: UUID) {
         #if canImport(CallKit) && os(iOS)
+        guard !callKitUnavailable else { return }
         provider.reportOutgoingCall(with: uuid, startedConnectingAt: nil)
         #endif
     }
     private func reportConnected() {
         #if canImport(CallKit) && os(iOS)
-        if let call { provider.reportOutgoingCall(with: call.uuid, connectedAt: nil) }
+        guard !callKitUnavailable, let call else { return }
+        provider.reportOutgoingCall(with: call.uuid, connectedAt: nil)
         #endif
     }
     private func reportEnded(uuid: UUID, failed: Bool) {
         #if canImport(CallKit) && os(iOS)
-        provider.reportCall(with: uuid, endedAt: nil, reason: failed ? .failed : .remoteEnded)
+        if !callKitUnavailable { provider.reportCall(with: uuid, endedAt: nil, reason: failed ? .failed : .remoteEnded) }
+        clearLocalCallNotification(uuid: uuid)
         #endif
     }
+
+    #if canImport(UserNotifications) && os(iOS)
+    /// In-app fallback for a device/region where CallKit's incoming-call reporting fails: a local
+    /// notification (so the call surfaces even if the app is backgrounded) plus `IncomingCallBanner`
+    /// in `RelayCallOverlay`, which renders on iOS only when `callKitUnavailable` is true.
+    private func notifyIncomingCallLocally(uuid: UUID, name: String, video: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = name
+            content.body = "Incoming \(video ? "video" : "audio") call"
+            content.sound = .default
+            content.userInfo = ["relayCallUUID": uuid.uuidString]
+            let request = UNNotificationRequest(identifier: "relay-call-\(uuid.uuidString)", content: content, trigger: nil)
+            center.add(request)
+        }
+    }
+    private func clearLocalCallNotification(uuid: UUID) {
+        let ids = ["relay-call-\(uuid.uuidString)"]
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+    }
+    #endif
     #if canImport(CallKit) && os(iOS)
     func reportNewIncomingCall(uuid: UUID, update: CXCallUpdate, completion: @escaping @Sendable (Error?) -> Void) {
         provider.reportNewIncomingCall(with: uuid, update: update, completion: completion)
@@ -464,7 +548,18 @@ extension CallCenter: CXProviderDelegate {
         action.fulfill()
     }
     nonisolated public func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
-        Task { @MainActor in self.performEnd(uuid: action.callUUID) }
+        Task { @MainActor in
+            // CallKit ending a call it just finished reporting, this fast, is not a human tapping
+            // decline — see `incomingReportedAt`'s doc comment. Flag it so the NEXT incoming call
+            // skips CallKit and uses the banner/notification fallback (this one is already lost —
+            // CallKit committed to ending it before we could intervene).
+            if let probe = self.callKitReportedAt, probe.uuid == action.callUUID,
+               Date().timeIntervalSince(probe.at) < Self.callKitProbeWindow,
+               let phase = self.call?.phase, phase == .incoming || phase == .outgoing || phase == .connecting {
+                self.markCallKitUnavailable()
+            }
+            self.performEnd(uuid: action.callUUID)
+        }
         action.fulfill()
     }
     nonisolated public func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {

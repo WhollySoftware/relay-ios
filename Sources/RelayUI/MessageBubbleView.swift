@@ -5,6 +5,13 @@ import UIKit
 import AppKit
 #endif
 
+/// Sent / seen receipt for the last own message.
+public enum MessageReceiptStatus: Equatable {
+    case sent
+    /// `by` is the reader count in a group thread, nil for a 1:1 chat.
+    case seen(by: Int?)
+}
+
 /// One message bubble — text, image, audio (as a link), deleted placeholder, quoted reply,
 /// edited mark, optimistic states, and a context menu for reply/edit/delete.
 public struct MessageBubbleView: View {
@@ -13,7 +20,7 @@ public struct MessageBubbleView: View {
     let isOwn: Bool
     var senderName: String?
     var continued = false
-    var status: String?
+    var status: MessageReceiptStatus?
     var onReply: ((Message) -> Void)?
     var onEdit: ((Message) -> Void)?
     var onDelete: ((Message) -> Void)?
@@ -21,12 +28,22 @@ public struct MessageBubbleView: View {
     var onDiscard: ((Message) -> Void)?
     var onForward: ((Message) -> Void)?
 
-    public init(message: Message, isOwn: Bool, senderName: String? = nil, continued: Bool = false, status: String? = nil,
+    public init(message: Message, isOwn: Bool, senderName: String? = nil, continued: Bool = false, status: MessageReceiptStatus? = nil,
                 onReply: ((Message) -> Void)? = nil, onEdit: ((Message) -> Void)? = nil, onDelete: ((Message) -> Void)? = nil,
                 onRetry: ((Message) -> Void)? = nil, onDiscard: ((Message) -> Void)? = nil, onForward: ((Message) -> Void)? = nil) {
         self.message = message; self.isOwn = isOwn; self.senderName = senderName; self.continued = continued; self.status = status
         self.onReply = onReply; self.onEdit = onEdit; self.onDelete = onDelete; self.onRetry = onRetry; self.onDiscard = onDiscard
         self.onForward = onForward
+    }
+
+    // Call summary lines are posted by the service as plain text ("📞 Video call · 0:30",
+    // "📵 Video call cancelled", "📵 Missed call", "📵 Declined call") — a leading 📞 is a completed
+    // call, 📵 is missed/declined/cancelled. Recognized here purely by that prefix so no protocol
+    // change was needed to give them their own pill instead of a normal chat bubble.
+    private var callInfo: (label: String, missed: Bool)? {
+        if message.body.hasPrefix("📞 ") { return (String(message.body.dropFirst(2)), false) }
+        if message.body.hasPrefix("📵 ") { return (String(message.body.dropFirst(2)), true) }
+        return nil
     }
 
     /// What "Share" hands to the system share sheet — the message text, or the attachment's URL
@@ -37,6 +54,19 @@ public struct MessageBubbleView: View {
     }
 
     public var body: some View {
+        if let callInfo {
+            HStack {
+                if isOwn { Spacer(minLength: 48) }
+                callPill(label: callInfo.label, missed: callInfo.missed)
+                if !isOwn { Spacer(minLength: 48) }
+            }
+            .padding(.top, continued ? 0 : 6)
+        } else {
+            normalBubble
+        }
+    }
+
+    private var normalBubble: some View {
         HStack {
             if isOwn { Spacer(minLength: 48) }
             VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
@@ -74,12 +104,52 @@ public struct MessageBubbleView: View {
                         if let onDiscard { Button("Discard") { onDiscard(message) }.font(.caption) }
                     }
                 }
-                if let status { Text(status).font(.caption2).foregroundStyle(theme.secondaryText).padding(.trailing, 4) }
+                if let status { receiptView(status) }
             }
             if !isOwn { Spacer(minLength: 48) }
         }
         .padding(.top, continued ? 0 : 6)
         .opacity(message.status == .sending ? 0.7 : 1)
+    }
+
+    // WhatsApp-style receipt: single check = sent, double check = seen (green) — this SDK has no
+    // distinct "delivered" signal (only sent vs. read-receipt "seen"), so there's no gray
+    // double-check tier here.
+    private func receiptView(_ status: MessageReceiptStatus) -> some View {
+        HStack(spacing: 4) {
+            switch status {
+            case .sent:
+                Image(systemName: "checkmark").font(.caption2).foregroundStyle(theme.secondaryText)
+            case .seen(let by):
+                HStack(spacing: -5) {
+                    Image(systemName: "checkmark")
+                    Image(systemName: "checkmark")
+                }
+                .font(.caption2.bold())
+                .foregroundStyle(Color(red: 0.30, green: 0.69, blue: 0.31))
+                if let by { Text("by \(by)").font(.caption2).foregroundStyle(theme.secondaryText) }
+            }
+        }
+        .padding(.trailing, 4)
+    }
+
+    private func callPill(label: String, missed: Bool) -> some View {
+        let tint = missed ? Color(red: 0.898, green: 0.224, blue: 0.208) : Color(red: 0.30, green: 0.69, blue: 0.31)
+        let isVideo = label.localizedCaseInsensitiveContains("video")
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(tint)
+                Image(systemName: isVideo ? "video.fill" : "phone.fill").font(.caption).foregroundStyle(.white)
+            }
+            .frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.subheadline.weight(.semibold))
+                Text(RelayFormat.time(message.createdAt)).font(.caption2).foregroundStyle(theme.secondaryText)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .frame(maxWidth: 300, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(tint.opacity(0.5), lineWidth: 1))
     }
 
     private var bubble: some View {
@@ -155,7 +225,9 @@ public struct MessageBubbleView: View {
                 if message.status == .sending { Image(systemName: "clock").font(.caption2) }
             }
             .opacity(0.7)
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            // No .frame(maxWidth: .infinity) here — that used to force this row (and therefore
+            // the whole bubble, since a VStack sizes to its widest child) to the full 300pt cap
+            // even for a two-word message. Left un-stretched, the bubble now hugs its content.
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .foregroundStyle(isOwn ? theme.bubbleMineText : theme.bubbleTheirsText)

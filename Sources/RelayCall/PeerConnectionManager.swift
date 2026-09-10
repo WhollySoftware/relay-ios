@@ -141,6 +141,15 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
         try? session.setCategory(.playAndRecord, mode: video ? .videoChat : .voiceChat, options: [.allowBluetooth, .allowBluetoothA2DP])
         #endif
     }
+    /// CallKit normally activates the audio session itself (`provider(_:didActivate:)`, which flips
+    /// `RTCAudioSession.isAudioEnabled`). When CallKit is unavailable that delegate never fires, so
+    /// the CallKit-unavailable fallback calls this directly after `configureAudioSession` or audio
+    /// stays silent for the whole call.
+    static func activateAudioSessionWithoutCallKit() {
+        #if os(iOS)
+        RTCAudioSession.sharedInstance().isAudioEnabled = true
+        #endif
+    }
     static func setSpeaker(_ on: Bool) {
         #if os(iOS)
         let session = RTCAudioSession.sharedInstance()

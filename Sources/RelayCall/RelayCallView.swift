@@ -12,8 +12,17 @@ public struct RelayCallOverlay: View {
         ZStack {
             if let call = center.call {
                 if call.phase == .incoming {
+                    // CallKit shows the incoming call natively on iOS. On a device/region where
+                    // CallKit reporting fails (the Simulator, or China-region builds — CallKit is
+                    // disallowed there by App Store guidelines), CallCenter sets
+                    // `callKitUnavailable` and falls back to a local notification; this banner is
+                    // the in-app half of that fallback so the call still has a visible affordance.
                     #if !os(iOS)
                     IncomingCallBanner(center: center, call: call)
+                    #else
+                    if center.callKitUnavailable {
+                        IncomingCallBanner(center: center, call: call)
+                    }
                     #endif
                 } else {
                     RelayCallView(center: center, call: call).transition(.opacity)
