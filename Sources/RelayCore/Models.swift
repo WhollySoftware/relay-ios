@@ -60,14 +60,17 @@ public struct Conversation: Codable, Sendable, Equatable, Identifiable {
     public var lastMessage: MessagePreview?
     public var lastMessageAt: Date?
     public var unreadCount: Int
+    /// Whether the CURRENT user has muted this conversation — a personal preference, not visible
+    /// to other members.
+    public var muted: Bool
     public let createdAt: Date
 
     public init(id: ConversationId, isGroup: Bool, name: String? = nil, photoUrl: String? = nil, creatorId: UserId? = nil,
                 peer: RelayUser? = nil, members: [GroupMember] = [], memberCount: Int, lastMessage: MessagePreview? = nil,
-                lastMessageAt: Date? = nil, unreadCount: Int = 0, createdAt: Date) {
+                lastMessageAt: Date? = nil, unreadCount: Int = 0, muted: Bool = false, createdAt: Date) {
         self.id = id; self.isGroup = isGroup; self.name = name; self.photoUrl = photoUrl; self.creatorId = creatorId
         self.peer = peer; self.members = members; self.memberCount = memberCount; self.lastMessage = lastMessage
-        self.lastMessageAt = lastMessageAt; self.unreadCount = unreadCount; self.createdAt = createdAt
+        self.lastMessageAt = lastMessageAt; self.unreadCount = unreadCount; self.muted = muted; self.createdAt = createdAt
     }
 
     /// Display title: the group name, or the peer's name/id.

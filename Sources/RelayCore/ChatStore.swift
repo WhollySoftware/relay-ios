@@ -122,6 +122,23 @@ public final class ChatStore {
         clearThread(id)
     }
 
+    /// Optimistically patches the local `muted` flag, then confirms with the server.
+    public func muteConversation(_ id: ConversationId, muted: Bool) async throws {
+        let previous = conversation(id)?.muted
+        patch(id) { $0.muted = muted }
+        do {
+            _ = try await api.muteConversation(id, muted: muted)
+        } catch {
+            if let previous { patch(id) { $0.muted = previous } }
+            throw error
+        }
+    }
+
+    /// Messages with an image/audio/file attachment only — for the media gallery.
+    public func getMedia(_ id: ConversationId, before: MessageId? = nil, limit: Int = 60) async throws -> MessagesPage {
+        try await api.getMedia(id, before: before, limit: limit)
+    }
+
     public func refreshConversation(_ id: ConversationId) async {
         if let pending = pendingConversationFetch[id] { await pending.value; return }
         let task = Task { [api] in
@@ -469,6 +486,8 @@ public final class ChatStore {
             remove(conversationId)
         case .conversationCleared(let conversationId):
             clearThread(conversationId)
+        case .conversationMuted(let conversationId, let muted):
+            patch(conversationId) { $0.muted = muted }
         case .membersAdded(let conversationId, _), .memberRemoved(let conversationId, _), .memberLeft(let conversationId, _):
             Task { await refreshConversation(conversationId) }
         case .pong, .unknown:

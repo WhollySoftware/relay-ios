@@ -15,6 +15,7 @@ public enum RelayEvent: Sendable, Equatable {
     case conversationUpdated(conversationId: ConversationId, name: String?, photoUrl: String?)
     case conversationDeleted(conversationId: ConversationId)
     case conversationCleared(conversationId: ConversationId)
+    case conversationMuted(conversationId: ConversationId, muted: Bool)
     case membersAdded(conversationId: ConversationId, userIds: [UserId])
     case memberRemoved(conversationId: ConversationId, userId: UserId)
     case memberLeft(conversationId: ConversationId, userId: UserId)
@@ -34,6 +35,7 @@ public enum RelayEvent: Sendable, Equatable {
         case .conversationUpdated: return "conversation_updated"
         case .conversationDeleted: return "conversation_deleted"
         case .conversationCleared: return "conversation_cleared"
+        case .conversationMuted: return "conversation_muted"
         case .membersAdded: return "members_added"
         case .memberRemoved: return "member_removed"
         case .memberLeft: return "member_left"
@@ -56,6 +58,7 @@ public enum RelayEvent: Sendable, Equatable {
         let name: String?
         let photoUrl: String?
         let userIds: [UserId]?
+        let muted: Bool?
     }
 
     public static func decode(_ data: Data) -> RelayEvent? {
@@ -92,6 +95,9 @@ public enum RelayEvent: Sendable, Equatable {
         case "conversation_cleared":
             guard let c = raw.conversationId else { return nil }
             return .conversationCleared(conversationId: c)
+        case "conversation_muted":
+            guard let c = raw.conversationId, let m = raw.muted else { return nil }
+            return .conversationMuted(conversationId: c, muted: m)
         case "members_added":
             guard let c = raw.conversationId else { return nil }
             return .membersAdded(conversationId: c, userIds: raw.userIds ?? [])

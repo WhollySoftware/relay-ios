@@ -137,6 +137,15 @@ public final class RelayAPI: Sendable {
         let _: OkResult = try await request("POST", "/conversations/\(id)/clear")
     }
 
+    public struct MuteResult: Decodable, Sendable { public let ok: Bool; public let muted: Bool }
+    private struct MuteBody: Encodable { let muted: Bool }
+
+    /// Mute/unmute notifications for the CURRENT user only — a personal preference, invisible to
+    /// other members.
+    public func muteConversation(_ id: ConversationId, muted: Bool) async throws -> MuteResult {
+        try await request("PATCH", "/conversations/\(id)/mute", body: MuteBody(muted: muted))
+    }
+
     // MARK: - Messages
 
     private struct MessageEnvelope: Decodable { let message: Message; let clientId: String? }
@@ -151,6 +160,12 @@ public final class RelayAPI: Sendable {
 
     public func messages(in id: ConversationId, before: MessageId? = nil, limit: Int = 50) async throws -> MessagesPage {
         try await request("GET", "/conversations/\(id)/messages", query: ["before": before, "limit": String(limit)])
+    }
+
+    /// Messages with an image/audio/file attachment only (excludes deleted messages) — backs the
+    /// "Media, links & docs" gallery without paging through the whole text history.
+    public func getMedia(_ id: ConversationId, before: MessageId? = nil, limit: Int = 60) async throws -> MessagesPage {
+        try await request("GET", "/conversations/\(id)/messages", query: ["kind": "media", "before": before, "limit": String(limit)])
     }
 
     public func sendMessage(in id: ConversationId, _ input: SendMessageInput) async throws -> Message {
