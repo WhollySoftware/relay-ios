@@ -10,8 +10,17 @@ public struct MessageThreadView: View {
     @State private var replyTo: Message?
     @State private var editing: Message?
     @State private var forwarding: Message?
+    @State private var showingGroupDetail = false
 
-    public init(conversationId: ConversationId) { self.conversationId = conversationId }
+    /// Invoked when the group admin taps "Add people" in the group info screen; return the user
+    /// ids to invite (or nil/empty to cancel). Omit to hide "Add people" — the host owns the
+    /// picker UI since it needs access to e.g. a contacts list this package doesn't have.
+    var onPickGroupMembers: (() async -> [UserId]?)?
+
+    public init(conversationId: ConversationId, onPickGroupMembers: (() async -> [UserId]?)? = nil) {
+        self.conversationId = conversationId
+        self.onPickGroupMembers = onPickGroupMembers
+    }
 
     public var body: some View {
         let chat = client.chat
@@ -89,7 +98,16 @@ public struct MessageThreadView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(conversation?.title ?? "").font(.headline).lineLimit(1)
+                        if conversation?.isGroup == true {
+                            Button {
+                                showingGroupDetail = true
+                            } label: {
+                                Text(conversation?.title ?? "").font(.headline).lineLimit(1)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            Text(conversation?.title ?? "").font(.headline).lineLimit(1)
+                        }
                         Text(subtitle(conversation)).font(.caption2).foregroundStyle(theme.secondaryText)
                     }
                 }
@@ -101,6 +119,9 @@ public struct MessageThreadView: View {
         }
         .onDisappear {
             if chat.viewingConversationId == conversationId { chat.setViewing(nil) }
+        }
+        .sheet(isPresented: $showingGroupDetail) {
+            GroupDetailView(conversationId: conversationId, onPickAdd: onPickGroupMembers)
         }
         .sheet(item: $forwarding) { message in
             ForwardPickerView(conversations: chat.conversations.filter { $0.id != conversationId }) { targetId in
