@@ -10,7 +10,9 @@ public struct Call: Codable, Sendable, Equatable {
     public let type: CallType
     public let status: CallStatus
     public let callerId: UserId
-    public let calleeId: UserId
+    // nil for a group call (see service/src/lib/calls.js callJson) — non-caller members are
+    // authorized via their call_participants row instead of a single callee.
+    public let calleeId: UserId?
     public let startedAt: Date?
     public let endedAt: Date?
     public let endReason: String?
