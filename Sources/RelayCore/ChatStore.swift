@@ -139,6 +139,12 @@ public final class ChatStore {
         try await api.getMedia(id, before: before, limit: limit)
     }
 
+    /// Per-message read/delivery breakdown for a message YOU sent — a one-off fetch when the
+    /// "Message info" screen opens, no local caching needed.
+    public func getMessageReceipts(_ id: ConversationId, messageId: MessageId) async throws -> RelayAPI.MessageReceiptsResponse {
+        try await api.getMessageReceipts(id, messageId: messageId)
+    }
+
     public func refreshConversation(_ id: ConversationId) async {
         if let pending = pendingConversationFetch[id] { await pending.value; return }
         let task = Task { [api] in

@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
+import PDFKit
 #if os(iOS)
 import UIKit
 #endif
@@ -255,7 +256,14 @@ public struct MessageComposerView: View {
             guard let data = try? Data(contentsOf: url) else { error = "Couldn't read that file."; return }
             guard data.count <= maxAttachmentBytes else { error = "That file is too large (max ~9.5MB)."; return }
             let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-            let (thumbnail, durationSec): (String?, Int?) = mime.hasPrefix("video/") ? await generateVideoThumbnail(url: url) : (nil, nil)
+            let (thumbnail, durationSec): (String?, Int?)
+            if mime.hasPrefix("video/") {
+                (thumbnail, durationSec) = await generateVideoThumbnail(url: url)
+            } else if mime == "application/pdf" {
+                (thumbnail, durationSec) = (await generatePdfThumbnail(url: url), nil)
+            } else {
+                (thumbnail, durationSec) = (nil, nil)
+            }
             pendingAttachment = .file(dataUrl: "data:\(mime);base64,\(data.base64EncodedString())", name: url.lastPathComponent, mime: mime, thumbnail: thumbnail, durationSec: durationSec)
         }
     }
@@ -283,6 +291,22 @@ public struct MessageComposerView: View {
         } catch {
             return (nil, durationSec)
         }
+    }
+
+    /// A small JPEG render of a PDF's first page, entirely client-side, using the built-in
+    /// PDFKit framework (no new dependency, no AVFoundation ceremony needed).
+    /// Best-effort: nil on any failure (corrupt/encrypted PDF, etc.) rather than blocking the send.
+    private func generatePdfThumbnail(url: URL) async -> String? {
+        guard let doc = PDFDocument(url: url), let page = doc.page(at: 0) else { return nil }
+        let image = page.thumbnail(of: CGSize(width: 480, height: 480), for: .mediaBox)
+        #if os(iOS)
+        guard let jpegData = image.jpegData(compressionQuality: 0.6) else { return nil }
+        #else
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        guard let jpegData = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else { return nil }
+        #endif
+        return "data:image/jpeg;base64,\(jpegData.base64EncodedString())"
     }
 }
 

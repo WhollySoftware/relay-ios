@@ -27,13 +27,15 @@ public struct MessageBubbleView: View {
     var onRetry: ((Message) -> Void)?
     var onDiscard: ((Message) -> Void)?
     var onForward: ((Message) -> Void)?
+    var onShowInfo: ((Message) -> Void)?
 
     public init(message: Message, isOwn: Bool, senderName: String? = nil, continued: Bool = false, status: MessageReceiptStatus? = nil,
                 onReply: ((Message) -> Void)? = nil, onEdit: ((Message) -> Void)? = nil, onDelete: ((Message) -> Void)? = nil,
-                onRetry: ((Message) -> Void)? = nil, onDiscard: ((Message) -> Void)? = nil, onForward: ((Message) -> Void)? = nil) {
+                onRetry: ((Message) -> Void)? = nil, onDiscard: ((Message) -> Void)? = nil, onForward: ((Message) -> Void)? = nil,
+                onShowInfo: ((Message) -> Void)? = nil) {
         self.message = message; self.isOwn = isOwn; self.senderName = senderName; self.continued = continued; self.status = status
         self.onReply = onReply; self.onEdit = onEdit; self.onDelete = onDelete; self.onRetry = onRetry; self.onDiscard = onDiscard
-        self.onForward = onForward
+        self.onForward = onForward; self.onShowInfo = onShowInfo
     }
 
     // Call summary lines are posted by the service as plain text ("📞 Video call · 0:30",
@@ -94,6 +96,7 @@ public struct MessageBubbleView: View {
                                 ShareLink(item: shareText) { Label("Share", systemImage: "square.and.arrow.up") }
                             }
                             if isOwn, let onEdit, message.imageUrl == nil, message.audioUrl == nil, message.fileUrl == nil { Button { onEdit(message) } label: { Label("Edit", systemImage: "pencil") } }
+                            if isOwn, let onShowInfo { Button { onShowInfo(message) } label: { Label("Message info", systemImage: "info.circle") } }
                             if isOwn, let onDelete { Button(role: .destructive) { onDelete(message) } label: { Label("Delete", systemImage: "trash") } }
                         }
                     }
@@ -179,6 +182,7 @@ public struct MessageBubbleView: View {
                 }
                 if let file = message.fileUrl, let url = URL(string: file) {
                     let isVideo = (message.fileMime ?? "").hasPrefix("video/")
+                    let isPdf = (message.fileMime ?? "") == "application/pdf" && message.fileThumbnailUrl != nil
                     Link(destination: url) {
                         if isVideo {
                             ZStack {
@@ -201,6 +205,27 @@ public struct MessageBubbleView: View {
                                         }
                                     }.padding(6)
                                 }
+                            }
+                            .frame(width: 220, height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else if isPdf {
+                            ZStack {
+                                if let thumb = message.fileThumbnailUrl, let thumbUrl = URL(string: thumb) {
+                                    AsyncImage(url: thumbUrl) { phase in
+                                        if let img = phase.image { img.resizable().scaledToFill() } else { Color.black.opacity(0.3) }
+                                    }
+                                } else {
+                                    Color.black.opacity(0.3)
+                                }
+                                Image(systemName: "doc.richtext.fill").font(.system(size: 32)).foregroundStyle(.white)
+                                VStack {
+                                    Spacer()
+                                    HStack {
+                                        Text(message.fileName ?? "PDF").font(.caption2.bold()).foregroundStyle(.white).lineLimit(1)
+                                            .padding(.horizontal, 6).padding(.vertical, 2)
+                                            .background(Capsule().fill(.black.opacity(0.55)))
+                                        Spacer()
+                                    }
+                                }.padding(6)
                             }
                             .frame(width: 220, height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
                         } else {

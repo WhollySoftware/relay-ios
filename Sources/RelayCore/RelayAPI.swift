@@ -195,6 +195,16 @@ public final class RelayAPI: Sendable {
         (try await request("GET", "/conversations/\(id)/read-receipts") as ReceiptsEnvelope).receipts
     }
 
+    public struct MessageReceiptEntry: Codable, Sendable { public let userId: String; public let readAt: String?; public let deliveredAt: String? }
+    public struct MessageReceiptsResponse: Codable, Sendable { public let readBy: [MessageReceiptEntry]; public let deliveredTo: [MessageReceiptEntry] }
+
+    /// Per-message read/delivery breakdown for a message YOU sent — unlike `readReceipts`, which
+    /// only exposes each participant's conversation-wide "last read" watermark, this answers who
+    /// has read *this specific* message vs. only received it, for the "Message info" screen.
+    public func getMessageReceipts(_ id: ConversationId, messageId: MessageId) async throws -> MessageReceiptsResponse {
+        try await request("GET", "/conversations/\(id)/messages/\(messageId)/receipts")
+    }
+
     private struct LinkPreviewEnvelope: Decodable { let preview: LinkPreview? }
 
     /// OG metadata for a URL found in a message body, for a WhatsApp-style preview card. Server-

@@ -11,6 +11,7 @@ public struct MessageThreadView: View {
     @State private var editing: Message?
     @State private var forwarding: Message?
     @State private var showingGroupDetail = false
+    @State private var infoMessage: Message?
 
     /// Invoked when the group admin taps "Add people" in the group info screen; return the user
     /// ids to invite (or nil/empty to cancel). Omit to hide "Add people" — the host owns the
@@ -58,7 +59,8 @@ public struct MessageThreadView: View {
                                 onDelete: { m in Task { try? await chat.deleteMessage(conversationId, messageId: m.id) } },
                                 onRetry: { m in if let cid = m.clientId { Task { try? await chat.retryMessage(conversationId, clientId: cid) } } },
                                 onDiscard: { m in if let cid = m.clientId { chat.discardMessage(conversationId, clientId: cid) } },
-                                onForward: { forwarding = $0 }
+                                onForward: { forwarding = $0 },
+                                onShowInfo: { infoMessage = $0 }
                             )
                             .id(message.id)
                         }
@@ -122,6 +124,9 @@ public struct MessageThreadView: View {
         }
         .sheet(isPresented: $showingGroupDetail) {
             GroupDetailView(conversationId: conversationId, onPickAdd: onPickGroupMembers)
+        }
+        .sheet(item: $infoMessage) { message in
+            MessageInfoView(conversationId: conversationId, message: message)
         }
         .sheet(item: $forwarding) { message in
             ForwardPickerView(conversations: chat.conversations.filter { $0.id != conversationId }) { targetId in

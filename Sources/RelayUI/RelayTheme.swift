@@ -53,6 +53,12 @@ public enum RelayFormat {
         date.formatted(date: .omitted, time: .shortened)
     }
 
+    /// Full date + time — e.g. for "Message info" read/delivered timestamps, where the compact
+    /// `relative`/`time` helpers above are too coarse.
+    public static func dateTime(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .shortened)
+    }
+
     /// "Today", "Yesterday", weekday, or a short date — for day separators.
     public static func day(_ date: Date, now: Date = Date()) -> String {
         let cal = Calendar.current
