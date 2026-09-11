@@ -262,7 +262,12 @@ struct GroupDetailView: View {
     private func load() async {
         do {
             let response = try await client.api.participants(of: conversationId)
-            participants = response.participants
+            // Admin (the creator) always shown first, everyone else keeps the server's join order.
+            if let cid = response.creatorId {
+                participants = response.participants.sorted { ($0.userId == cid ? 0 : 1) < ($1.userId == cid ? 0 : 1) }
+            } else {
+                participants = response.participants
+            }
             creatorId = response.creatorId
         } catch {
             errorText = "Could not load participants."
