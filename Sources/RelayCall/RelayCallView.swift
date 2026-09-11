@@ -1,6 +1,9 @@
 import SwiftUI
 import RelayCore
 @preconcurrency import WebRTC
+#if os(iOS)
+import UIKit
+#endif
 
 /// Full-screen call UI for outgoing/connecting/active/reconnecting (CallKit shows incoming on iOS;
 /// on other platforms, or if you don't use CallKit, show `IncomingCallBanner`). Mount
@@ -37,6 +40,48 @@ public struct RelayCallOverlay: View {
                     Spacer()
                 }.padding(.top, 12)
             }
+        }
+    }
+}
+
+/// Persistent, non-blocking banner shown in-call when the mic/camera couldn't be captured because
+/// the OS permission isn't granted — the call still connects and the other side is still fully
+/// audible/visible to this device, but this device is silently sending nothing. Doesn't block the
+/// call controls; just a dismiss-free hint with a shortcut to Settings.
+struct PermissionBanner: View {
+    let micDenied: Bool
+    let cameraDenied: Bool
+
+    private var message: String {
+        switch (micDenied, cameraDenied) {
+        case (true, true): return "Microphone/camera access needed — you can hear/see the other person, but they can't hear/see you."
+        case (true, false): return "Microphone access needed — you can hear the other person, but they can't hear you."
+        case (false, true): return "Camera access needed — you can see the other person, but they can't see you."
+        case (false, false): return ""
+        }
+    }
+
+    var body: some View {
+        if micDenied || cameraDenied {
+            HStack(spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                Text(message).font(.caption).foregroundStyle(.white)
+                Spacer(minLength: 8)
+                #if os(iOS)
+                Button("Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(.caption.bold())
+                .buttonStyle(.plain)
+                .foregroundStyle(.yellow)
+                #endif
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(.black.opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal)
         }
     }
 }
@@ -107,6 +152,8 @@ public struct RelayCallView: View {
                     }
                     Spacer()
                 }
+                PermissionBanner(micDenied: center.localMicPermissionDenied, cameraDenied: call.type == .video && center.localCameraPermissionDenied)
+                    .padding(.top, 6)
                 if showRemoteVideo { statusView.padding(.top, 8) }
                 Spacer()
                 // The renderer stays mounted (not conditionally) when the camera is off, so its

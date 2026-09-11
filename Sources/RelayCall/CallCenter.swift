@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Observation
 import RelayCore
@@ -58,6 +59,14 @@ public final class CallCenter: NSObject {
     public private(set) var remoteMicEnabledByUser: [UserId: Bool] = [:]
     public private(set) var remoteCameraEnabledByUser: [UserId: Bool] = [:]
     public var errorMessage: String?
+    /// True when the mic is not authorized (denied/restricted, or not-yet-determined and then
+    /// denied when we prompted). Computed once, right around call start/answer — no live
+    /// permission-change observer. The call proceeds regardless (WebRTC/AVFoundation just
+    /// captures silence for a denied mic); this only drives the in-call banner so the local user
+    /// knows the other side can't hear them.
+    public private(set) var localMicPermissionDenied = false
+    /// Same as `localMicPermissionDenied`, but for the camera — only meaningful for video calls.
+    public private(set) var localCameraPermissionDenied = false
     /// Shown by CallKit for outgoing calls and as a fallback name; set your app's display name.
     public var localizedAppName = "Call"
     /// True once CallKit has been observed to reject a call on this device (the Simulator, or a
@@ -186,6 +195,8 @@ public final class CallCenter: NSObject {
                     // form when someone else answers and offers to us (newest-joiner-initiates).
                     // Local media is still acquired eagerly so the caller's own preview works.
                     do {
+                        await refreshLocalPermissionFlags(type: type)
+                        guard call?.uuid == uuid else { return }
                         let media = LocalMedia(type: type)
                         guard call?.uuid == uuid else { media.close(); return }
                         #if !os(iOS)
@@ -199,6 +210,8 @@ public final class CallCenter: NSObject {
                 }
                 let manager = makeManager(callId: res.callId, userId: peer!.userId)
                 do {
+                    await refreshLocalPermissionFlags(type: type)
+                    guard call?.uuid == uuid else { manager.close(); return }
                     let media = LocalMedia(type: type)
                     let servers = await iceServers()
                     guard call?.uuid == uuid else { manager.close(); media.close(); return }
@@ -280,6 +293,8 @@ public final class CallCenter: NSObject {
                 if isGroup {
                     // Newest-joiner-initiates: offer to every already-joined participant (not us) —
                     // people who join later will offer to us instead (point 3 of the protocol).
+                    await refreshLocalPermissionFlags(type: type)
+                    guard stillMine(uuid) else { return }
                     let media = LocalMedia(type: type)
                     guard stillMine(uuid) else { media.close(); return }
                     localMedia = media
@@ -307,6 +322,8 @@ public final class CallCenter: NSObject {
 
                 let m = makeManager(callId: callId, userId: current.peerId)
                 manager = m
+                await refreshLocalPermissionFlags(type: type)
+                guard stillMine(uuid) else { m.close(); return }
                 let media = LocalMedia(type: type)
                 let servers = await iceServers()
                 guard stillMine(uuid) else { m.close(); media.close(); return }
@@ -376,6 +393,27 @@ public final class CallCenter: NSObject {
 
     private func stillMine(_ uuid: UUID) -> Bool { call?.uuid == uuid }
     private func send(_ frame: [String: Any]) { client.sendFrame(frame) }
+
+    /// Detects (without gating) mic/camera permission ahead of constructing `LocalMedia`. Does
+    /// NOT block the call — it always proceeds; this only updates the published flags so the UI
+    /// can show a banner. For `.notDetermined` it actively prompts via `requestAccess` and waits
+    /// for the result, since that's the only chance to know before the call is already underway.
+    private func refreshLocalPermissionFlags(type: CallType) async {
+        localMicPermissionDenied = await !Self.isAuthorized(.audio)
+        localCameraPermissionDenied = type == .video ? await !Self.isAuthorized(.video) : false
+    }
+
+    private static func isAuthorized(_ mediaType: AVMediaType) async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+        case .authorized: return true
+        case .notDetermined:
+            return await withCheckedContinuation { c in
+                AVCaptureDevice.requestAccess(for: mediaType) { granted in c.resume(returning: granted) }
+            }
+        case .denied, .restricted: return false
+        @unknown default: return false
+        }
+    }
 
     private func iceServers() async -> [PeerConnectionManager.IceServer] {
         guard let turn = try? await client.api.turnCredentials() else { return [] }
@@ -541,6 +579,7 @@ public final class CallCenter: NSObject {
         call = nil; localVideoTrack = nil; remoteVideoTrack = nil; remoteVideoTracks = [:]
         micEnabled = true; cameraEnabled = true; speakerEnabled = false
         remoteMicEnabled = true; remoteCameraEnabled = true; remoteMicEnabledByUser = [:]; remoteCameraEnabledByUser = [:]
+        localMicPermissionDenied = false; localCameraPermissionDenied = false
     }
 
     private func handle(_ event: CallEvent) {

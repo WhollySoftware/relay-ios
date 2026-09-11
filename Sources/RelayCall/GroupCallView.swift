@@ -25,6 +25,7 @@ struct GroupCallView: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: 8) {
                 statusView.padding(.top, 8)
+                PermissionBanner(micDenied: center.localMicPermissionDenied, cameraDenied: call.type == .video && center.localCameraPermissionDenied)
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 8) {
                         ForEach(call.participantIds.filter { $0 != center.client.userId }, id: \.self) { userId in
