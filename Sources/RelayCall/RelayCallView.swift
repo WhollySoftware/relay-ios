@@ -11,7 +11,9 @@ public struct RelayCallOverlay: View {
     public var body: some View {
         ZStack {
             if let call = center.call {
-                if call.phase == .incoming {
+                if call.isGroup && call.phase != .incoming {
+                    GroupCallView(center: center, call: call).transition(.opacity)
+                } else if call.phase == .incoming {
                     // CallKit shows the incoming call natively on iOS. On a device/region where
                     // CallKit reporting fails (the Simulator, or China-region builds — CallKit is
                     // disallowed there by App Store guidelines), CallCenter sets

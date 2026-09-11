@@ -1,8 +1,46 @@
 import Foundation
 @preconcurrency import WebRTC
 
-/// One RTCPeerConnection for one 1:1 call — the DevBattel WebRTCManager, generalised: candidates
-/// queued until the remote description exists, ICE restart by the offerer, mic/camera toggles.
+/// The one getUserMedia()-equivalent per call: a shared audio track, (for video calls) a shared
+/// video track + camera capturer, acquired ONCE and attached to every remote participant's
+/// RTCPeerConnection. Mirrors web's CallStore holding a single MediaStream shared across all of a
+/// call's PeerConnectionManagers — the capture session and mic are per-call, not per-peer.
+final class LocalMedia {
+    private static let factory: RTCPeerConnectionFactory = PeerConnectionManager.factory
+
+    let audioTrack: RTCAudioTrack
+    private(set) var videoTrack: RTCVideoTrack?
+    private var capturer: RTCCameraVideoCapturer?
+
+    init(type: CallType) {
+        audioTrack = Self.factory.audioTrack(with: Self.factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)), trackId: "audio0")
+        if type == .video {
+            let source = Self.factory.videoSource()
+            let cap = RTCCameraVideoCapturer(delegate: source)
+            capturer = cap
+            videoTrack = Self.factory.videoTrack(with: source, trackId: "video0")
+            let devices = RTCCameraVideoCapturer.captureDevices()
+            if let device = devices.first(where: { $0.position == .front }) ?? devices.first,
+               let format = RTCCameraVideoCapturer.supportedFormats(for: device).max(by: { CMVideoFormatDescriptionGetDimensions($0.formatDescription).width < CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) {
+                let fps = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 30
+                cap.startCapture(with: device, format: format, fps: Int(min(fps, 30)))
+            }
+        }
+    }
+
+    func setMicEnabled(_ enabled: Bool) { audioTrack.isEnabled = enabled }
+    func setCameraEnabled(_ enabled: Bool) { videoTrack?.isEnabled = enabled }
+
+    func close() {
+        capturer?.stopCapture()
+        capturer = nil
+    }
+}
+
+/// One RTCPeerConnection for one remote participant — the DevBattel WebRTCManager, generalised:
+/// candidates queued until the remote description exists, ICE restart by the offerer. A 1:1 call
+/// has exactly one of these; a group call has one per other participant, all sharing the same
+/// `LocalMedia` (one mic/camera, N RTCPeerConnections) — see `start(localMedia:iceServers:)`.
 final class PeerConnectionManager: NSObject, @unchecked Sendable {
     struct IceServer { let urls: [String]; let username: String?; let credential: String? }
     enum CallError: Error { case peerConnectionFailed, notStarted }
@@ -11,15 +49,14 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
     var onConnectionStateChange: (@Sendable (RTCPeerConnectionState) -> Void)?
     var onRemoteVideoTrack: (@Sendable (RTCVideoTrack) -> Void)?
 
-    private static let factory: RTCPeerConnectionFactory = {
+    fileprivate static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
         return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
     }()
 
     private var pc: RTCPeerConnection?
-    private var localAudioTrack: RTCAudioTrack?
+    // Not owned — LocalMedia owns acquisition/teardown; this class only attaches/reads.
     private(set) var localVideoTrack: RTCVideoTrack?
-    private var capturer: RTCCameraVideoCapturer?
     private var pendingRemoteCandidates: [RTCIceCandidate] = []
     private var remoteDescriptionSet = false
     private(set) var isOfferer = false
@@ -27,7 +64,7 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
     var connectionState: RTCPeerConnectionState? { pc?.connectionState }
     var canRestartIce: Bool { pc != nil && isOfferer && iceRestarts < 3 }
 
-    func start(type: CallType, iceServers: [IceServer]) throws {
+    func start(localMedia: LocalMedia, iceServers: [IceServer]) throws {
         let config = RTCConfiguration()
         config.iceServers = iceServers.isEmpty ? [RTCIceServer(urlStrings: ["stun:stun.l.google.com:19302"])]
             : iceServers.map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
@@ -38,22 +75,10 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
         }
         pc.delegate = self
         self.pc = pc
-        let audio = Self.factory.audioTrack(with: Self.factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)), trackId: "audio0")
-        localAudioTrack = audio
-        pc.add(audio, streamIds: ["stream0"])
-        if type == .video {
-            let source = Self.factory.videoSource()
-            let cap = RTCCameraVideoCapturer(delegate: source)
-            capturer = cap
-            let video = Self.factory.videoTrack(with: source, trackId: "video0")
+        pc.add(localMedia.audioTrack, streamIds: ["stream0"])
+        if let video = localMedia.videoTrack {
             localVideoTrack = video
             pc.add(video, streamIds: ["stream0"])
-            let devices = RTCCameraVideoCapturer.captureDevices()
-            if let device = devices.first(where: { $0.position == .front }) ?? devices.first,
-               let format = RTCCameraVideoCapturer.supportedFormats(for: device).max(by: { CMVideoFormatDescriptionGetDimensions($0.formatDescription).width < CMVideoFormatDescriptionGetDimensions($1.formatDescription).width }) {
-                let fps = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 30
-                cap.startCapture(with: device, format: format, fps: Int(min(fps, 30)))
-            }
         }
     }
 
@@ -119,15 +144,11 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
         pc.add(candidate)
     }
 
-    func setMicEnabled(_ enabled: Bool) { localAudioTrack?.isEnabled = enabled }
-    func setCameraEnabled(_ enabled: Bool) { localVideoTrack?.isEnabled = enabled }
-
     func close() {
-        capturer?.stopCapture()
-        capturer = nil
+        // Does NOT touch the shared LocalMedia (mic/camera/capturer) — other peers of the same
+        // group call may still be using it; the call owner closes LocalMedia separately.
         pc?.close()
         pc = nil
-        localAudioTrack = nil
         localVideoTrack = nil
         pendingRemoteCandidates = []
         remoteDescriptionSet = false

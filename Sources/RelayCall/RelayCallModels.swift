@@ -39,23 +39,30 @@ public struct ICECandidatePayload: Codable, Sendable, Equatable {
 
 /// Call events decoded from the gateway's `unknown` frames (RelayCore knows only chat events).
 enum CallEvent {
-    case invite(callId: String, conversationId: ConversationId, callerId: UserId, callerName: String?, type: CallType)
+    // participantIds (invite): everyone invited including the caller — only meaningful when isGroup.
+    case invite(callId: String, conversationId: ConversationId, callerId: UserId, callerName: String?, type: CallType, isGroup: Bool, participantIds: [UserId])
     case accepted(callId: String, acceptedBy: UserId)
     case declined(callId: String)
     case ended(callId: String, reason: String?)
     case missed(callId: String)
     case busy(conversationId: ConversationId)
-    case offer(callId: String, senderId: UserId, sdp: SDPPayload)
-    case answerSDP(callId: String, sdp: SDPPayload)
-    case ice(callId: String, candidate: ICECandidatePayload)
+    // targetUserId is only present on a group call's frames — nil for 1:1 (the server infers the
+    // old two-party behavior when it's absent).
+    case offer(callId: String, senderId: UserId, sdp: SDPPayload, targetUserId: UserId?)
+    case answerSDP(callId: String, senderId: UserId, sdp: SDPPayload, targetUserId: UserId?)
+    case ice(callId: String, senderId: UserId, candidate: ICECandidatePayload, targetUserId: UserId?)
     // Only the field that changed is present — the other is nil, not false. See handle(_:) for
     // why each side must be applied independently.
-    case mediaState(callId: String, cameraEnabled: Bool?, micEnabled: Bool?)
+    case mediaState(callId: String, senderId: UserId?, cameraEnabled: Bool?, micEnabled: Bool?)
+    case participantJoined(callId: String, conversationId: ConversationId, userId: UserId, participantIds: [UserId])
+    case participantDeclined(callId: String, conversationId: ConversationId, userId: UserId)
+    case participantLeft(callId: String, conversationId: ConversationId, userId: UserId, remaining: Int)
 
     private struct Raw: Decodable {
         let event: String; let callId: String?; let conversationId: String?; let callerId: String?; let callerName: String?
         let type: String?; let acceptedBy: String?; let reason: String?; let senderId: String?; let sdp: SDPPayload?; let candidate: ICECandidatePayload?
         let cameraEnabled: Bool?; let micEnabled: Bool?
+        let isGroup: Bool?; let participantIds: [String]?; let userId: String?; let remaining: Int?; let targetUserId: String?
     }
 
     static func decode(_ data: Data) -> CallEvent? {
@@ -63,23 +70,42 @@ enum CallEvent {
         switch r.event {
         case "call_invite":
             guard let c = r.callId, let conv = r.conversationId, let caller = r.callerId else { return nil }
-            return .invite(callId: c, conversationId: conv, callerId: caller, callerName: r.callerName, type: CallType(rawValue: r.type ?? "audio") ?? .audio)
+            return .invite(callId: c, conversationId: conv, callerId: caller, callerName: r.callerName, type: CallType(rawValue: r.type ?? "audio") ?? .audio,
+                            isGroup: r.isGroup ?? false, participantIds: r.participantIds ?? [])
         case "call_accepted": guard let c = r.callId, let by = r.acceptedBy else { return nil }; return .accepted(callId: c, acceptedBy: by)
         case "call_declined": guard let c = r.callId else { return nil }; return .declined(callId: c)
         case "call_end": guard let c = r.callId else { return nil }; return .ended(callId: c, reason: r.reason)
         case "call_missed": guard let c = r.callId else { return nil }; return .missed(callId: c)
         case "call_busy": guard let conv = r.conversationId else { return nil }; return .busy(conversationId: conv)
-        case "call_offer": guard let c = r.callId, let s = r.senderId, let sdp = r.sdp else { return nil }; return .offer(callId: c, senderId: s, sdp: sdp)
-        case "call_answer_sdp": guard let c = r.callId, let sdp = r.sdp else { return nil }; return .answerSDP(callId: c, sdp: sdp)
-        case "call_ice_candidate": guard let c = r.callId, let cand = r.candidate else { return nil }; return .ice(callId: c, candidate: cand)
-        case "call_media_state": guard let c = r.callId else { return nil }; return .mediaState(callId: c, cameraEnabled: r.cameraEnabled, micEnabled: r.micEnabled)
+        case "call_offer": guard let c = r.callId, let s = r.senderId, let sdp = r.sdp else { return nil }; return .offer(callId: c, senderId: s, sdp: sdp, targetUserId: r.targetUserId)
+        case "call_answer_sdp": guard let c = r.callId, let s = r.senderId, let sdp = r.sdp else { return nil }; return .answerSDP(callId: c, senderId: s, sdp: sdp, targetUserId: r.targetUserId)
+        case "call_ice_candidate": guard let c = r.callId, let s = r.senderId, let cand = r.candidate else { return nil }; return .ice(callId: c, senderId: s, candidate: cand, targetUserId: r.targetUserId)
+        case "call_media_state": guard let c = r.callId else { return nil }; return .mediaState(callId: c, senderId: r.senderId, cameraEnabled: r.cameraEnabled, micEnabled: r.micEnabled)
+        case "call_participant_joined":
+            guard let c = r.callId, let conv = r.conversationId, let u = r.userId else { return nil }
+            return .participantJoined(callId: c, conversationId: conv, userId: u, participantIds: r.participantIds ?? [])
+        case "call_participant_declined":
+            guard let c = r.callId, let conv = r.conversationId, let u = r.userId else { return nil }
+            return .participantDeclined(callId: c, conversationId: conv, userId: u)
+        case "call_participant_left":
+            guard let c = r.callId, let conv = r.conversationId, let u = r.userId, let remaining = r.remaining else { return nil }
+            return .participantLeft(callId: c, conversationId: conv, userId: u, remaining: remaining)
         default: return nil
         }
     }
 }
 
+/// One entry of a group call's answer response — present only for a group call (absent entirely
+/// on a 1:1 call's answer response, which is just `{ call }`).
+public struct CallParticipant: Codable, Sendable, Equatable {
+    public let userId: UserId
+    public let joinedAt: Date?
+    public let leftAt: Date?
+    public let declinedAt: Date?
+}
+
 extension RelayAPI {
-    private struct CallEnvelope: Decodable { let call: Call }
+    private struct CallEnvelope: Decodable { let call: Call; let participants: [CallParticipant]? }
     private struct StartBody: Encodable { let conversationId: String; let type: String }
     private struct EndBody: Encodable { let reason: String? }
     private struct TurnEnvelope: Decodable { let turn: TurnCredentials? }
@@ -87,7 +113,12 @@ extension RelayAPI {
     public func startCall(conversationId: ConversationId, type: CallType) async throws -> Call {
         (try await request("POST", "/calls", body: StartBody(conversationId: conversationId, type: type.rawValue)) as CallEnvelope).call
     }
-    public func answerCall(_ id: String) async throws -> Call { (try await request("POST", "/calls/\(id)/answer") as CallEnvelope).call }
+    /// For a group call, `participants` (the full roster with join/leave/decline timestamps) is
+    /// non-nil; nil for 1:1. See CallCenter.performAnswer for the newest-joiner-initiates use.
+    public func answerCall(_ id: String) async throws -> (call: Call, participants: [CallParticipant]?) {
+        let env: CallEnvelope = try await request("POST", "/calls/\(id)/answer")
+        return (env.call, env.participants)
+    }
     public func declineCall(_ id: String) async throws -> Call { (try await request("POST", "/calls/\(id)/decline") as CallEnvelope).call }
     public func endCall(_ id: String, reason: String? = nil) async throws -> Call {
         (try await request("POST", "/calls/\(id)/end", body: EndBody(reason: reason)) as CallEnvelope).call
