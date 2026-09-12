@@ -16,11 +16,24 @@ public struct MessageThreadView: View {
     /// Invoked when the group admin taps "Add people" in the group info screen; return the user
     /// ids to invite (or nil/empty to cancel). Omit to hide "Add people" — the host owns the
     /// picker UI since it needs access to e.g. a contacts list this package doesn't have.
+    /// Ignored (in favour of `onSearchPeople`'s SDK-owned picker) when that is also supplied.
     var onPickGroupMembers: (() async -> [UserId]?)?
 
-    public init(conversationId: ConversationId, onPickGroupMembers: (() async -> [UserId]?)? = nil) {
+    /// Invoked to search for people to add — once with "" the moment the SDK-owned "Add
+    /// participants" screen appears, then debounced as the host types a query. Supplying this
+    /// switches "Add people" in the group info screen from `onPickGroupMembers`'s host-owned flow
+    /// over to that built-in screen; omit to keep using `onPickGroupMembers` (or hide "Add people"
+    /// entirely if neither is supplied).
+    var onSearchPeople: ((String) async -> [RelayUser])?
+
+    public init(
+        conversationId: ConversationId,
+        onPickGroupMembers: (() async -> [UserId]?)? = nil,
+        onSearchPeople: ((String) async -> [RelayUser])? = nil
+    ) {
         self.conversationId = conversationId
         self.onPickGroupMembers = onPickGroupMembers
+        self.onSearchPeople = onSearchPeople
     }
 
     public var body: some View {
@@ -123,7 +136,7 @@ public struct MessageThreadView: View {
             if chat.viewingConversationId == conversationId { chat.setViewing(nil) }
         }
         .sheet(isPresented: $showingGroupDetail) {
-            GroupDetailView(conversationId: conversationId, onPickAdd: onPickGroupMembers)
+            GroupDetailView(conversationId: conversationId, onPickAdd: onPickGroupMembers, onSearchPeople: onSearchPeople)
         }
         .sheet(item: $infoMessage) { message in
             MessageInfoView(conversationId: conversationId, message: message)
@@ -140,6 +153,7 @@ public struct MessageThreadView: View {
                 }
             }
         }
+        .relayTypography(theme)
     }
 
     private func subtitle(_ c: Conversation?) -> String {

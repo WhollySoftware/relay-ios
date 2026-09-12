@@ -46,6 +46,39 @@ the gateway connection automatically — no configuration needed. If the project
 ID allowlist configured (in the admin panel or via `PATCH /projects/me/settings`), a request from
 an app whose bundle ID isn't on that list is rejected; an empty allowlist leaves it unrestricted.
 
+## Debugging
+
+`RelayConfig` has an opt-in verbose logging mode for diagnosing connection/call/module issues in
+a host app. It's off by default and changes nothing until you turn it on:
+
+```swift
+var config = RelayConfig(baseURL: url, publicKey: "pk_…", tokenProvider: { try await MyBackend.relayToken() })
+config.debug = true
+config.logger = { print("[Relay] \($0)") }
+let relay = RelayClient(config: config)
+```
+
+With both set, the SDK emits lines like:
+
+```
+[Relay] connecting to wss://relay.example.com/ws/gateway
+[Relay] connected
+[Relay] -> GET /conversations
+[Relay] <- GET /conversations 200
+[Relay] event: chat_message (conversationId=c_123, messageId=m_456)
+[Relay] modules updated: chat=true, audioCalls=true, videoCalls=false, chatAttachments=true, chatVoiceMessages=true, push=true
+[Relay] call call_789 ringing (outgoing)
+[Relay] TURN credentials fetched (3 ICE server URLs)
+[Relay] disconnected (code=1006, reason=The network connection was lost.)
+```
+
+With `debug` left `false` (the default), only the existing minimal reconnect-backoff message ever
+reaches `logger` — everything above is silent.
+
+**Guarantee**: debug logs never include auth tokens, TURN credentials, message content, attachment
+URLs, or user display names/avatars — only connection state, request paths (no query strings),
+event types, and non-content ids.
+
 ## Attachments
 
 `MessageComposerView` includes an attach button (Camera / Photo Library / File) alongside the

@@ -14,6 +14,13 @@ public struct RelayConfig: Sendable {
     public var maxBackoff: TimeInterval = 30
     /// Optional diagnostics sink.
     public var logger: (@Sendable (String) -> Void)?
+    /// Opt-in verbose diagnostics. When `true` AND `logger` is set, the SDK emits connection
+    /// lifecycle, REST call, gateway event, and call lifecycle lines through `logger` — see
+    /// "Debugging" in the README. Defaults to `false`: unchanged behavior from before this flag
+    /// existed (only the minimal reconnect message logs). Logs are redaction-first by design and
+    /// never include tokens, TURN credentials, message content, attachment URLs, or user
+    /// display names/avatars.
+    public var debug: Bool = false
     /// URLSession to use for REST + WebSocket (tests inject one with a custom protocol).
     public var session: URLSession = .shared
 

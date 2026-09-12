@@ -25,6 +25,7 @@ private let maxAttachmentBytes = 9_500_000 // same margin under the service's 14
 public struct MessageComposerView: View {
     @Environment(RelayClient.self) private var client
     @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let conversationId: ConversationId
     @Binding var replyTo: Message?
     @Binding var editing: Message?
@@ -69,8 +70,8 @@ public struct MessageComposerView: View {
             }
             if let error { Text(error).font(.caption).foregroundStyle(theme.danger) }
             HStack(alignment: .bottom, spacing: 8) {
-                if editing == nil {
-                    Button { showAttachMenu = true } label: { Image(systemName: "paperclip").font(.system(size: 20)) }
+                if editing == nil, client.modules.chatAttachments {
+                    Button { showAttachMenu = true } label: { icons.attach.font(.system(size: 20)) }
                         .buttonStyle(.plain)
                         .foregroundStyle(theme.secondaryText)
                         .confirmationDialog("Attach", isPresented: $showAttachMenu, titleVisibility: .hidden) {
@@ -93,7 +94,7 @@ public struct MessageComposerView: View {
                     }
                     .onSubmit { Task { await send() } }
                 Button { Task { await send() } } label: {
-                    Image(systemName: editing == nil ? "arrow.up.circle.fill" : "checkmark.circle.fill").font(.system(size: 30))
+                    (editing == nil ? icons.send : icons.confirm).font(.system(size: 30))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(canSend ? theme.accent : theme.secondaryText)
@@ -132,7 +133,7 @@ public struct MessageComposerView: View {
                 Text(body).font(.caption).lineLimit(1).foregroundStyle(theme.secondaryText)
             }
             Spacer()
-            Button { cancel() } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+            Button { cancel() } label: { icons.close }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.12)))
@@ -152,12 +153,12 @@ public struct MessageComposerView: View {
                     AsyncImage(url: url) { $0.image?.resizable().scaledToFill() }
                         .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
                 } else {
-                    Image(systemName: mime.hasPrefix("video/") ? "video.fill" : "doc.fill").frame(width: 44, height: 44)
+                    (mime.hasPrefix("video/") ? icons.cameraOn : icons.document).frame(width: 44, height: 44)
                 }
                 Text(name).font(.caption).lineLimit(1)
             }
             Spacer()
-            Button { pendingAttachment = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+            Button { pendingAttachment = nil } label: { icons.close }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.12)))

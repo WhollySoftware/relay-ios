@@ -1,37 +1,8 @@
 import SwiftUI
+// Re-exported (not just imported) so the rest of RelayUI keeps seeing RelayCore's types
+// (Conversation, Message, UserId, RelayClient, ...) without every file adding its own import —
+// matching the visibility the old RelayTheme.swift provided before RelayTheme moved to RelayCore.
 @_exported import RelayCore
-
-/// Colours and shapes for every RelayUI view. Override any of them and inject with
-/// `.relayTheme(...)`; defaults follow the system palette so the kit looks native untouched.
-public struct RelayTheme: Sendable {
-    public var accent: Color = .accentColor
-    public var bubbleMine: Color = .accentColor
-    public var bubbleMineText: Color = .white
-    public var bubbleTheirs: Color = Color.gray.opacity(0.18)
-    public var bubbleTheirsText: Color = .primary
-    public var secondaryText: Color = .secondary
-    public var online: Color = .green
-    public var danger: Color = .red
-    public var cornerRadius: CGFloat = 18
-    public var avatarSize: CGFloat = 44
-
-    public init() {}
-}
-
-private struct RelayThemeKey: EnvironmentKey {
-    static let defaultValue = RelayTheme()
-}
-
-public extension EnvironmentValues {
-    var relayTheme: RelayTheme {
-        get { self[RelayThemeKey.self] }
-        set { self[RelayThemeKey.self] = newValue }
-    }
-}
-
-public extension View {
-    func relayTheme(_ theme: RelayTheme) -> some View { environment(\.relayTheme, theme) }
-}
 
 // MARK: - Formatting helpers (shared by the views; also usable by hosts that bring their own UI)
 

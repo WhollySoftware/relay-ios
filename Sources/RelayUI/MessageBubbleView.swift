@@ -16,6 +16,7 @@ public enum MessageReceiptStatus: Equatable {
 /// edited mark, optimistic states, and a context menu for reply/edit/delete.
 public struct MessageBubbleView: View {
     @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let message: Message
     let isOwn: Bool
     var senderName: String?
@@ -122,14 +123,14 @@ public struct MessageBubbleView: View {
         HStack(spacing: 4) {
             switch status {
             case .sent:
-                Image(systemName: "checkmark").font(.caption2).foregroundStyle(theme.secondaryText)
+                icons.checkSent.font(.caption2).foregroundStyle(theme.secondaryText)
             case .seen(let by):
                 HStack(spacing: -5) {
-                    Image(systemName: "checkmark")
-                    Image(systemName: "checkmark")
+                    icons.checkRead
+                    icons.checkRead
                 }
                 .font(.caption2.bold())
-                .foregroundStyle(Color(red: 0.30, green: 0.69, blue: 0.31))
+                .foregroundStyle(theme.online)
                 if let by { Text("by \(by)").font(.caption2).foregroundStyle(theme.secondaryText) }
             }
         }
@@ -137,12 +138,12 @@ public struct MessageBubbleView: View {
     }
 
     private func callPill(label: String, missed: Bool) -> some View {
-        let tint = missed ? Color(red: 0.898, green: 0.224, blue: 0.208) : Color(red: 0.30, green: 0.69, blue: 0.31)
+        let tint = missed ? theme.danger : theme.online
         let isVideo = label.localizedCaseInsensitiveContains("video")
         return HStack(spacing: 10) {
             ZStack {
                 Circle().fill(tint)
-                Image(systemName: isVideo ? "video.fill" : "phone.fill").font(.caption).foregroundStyle(.white)
+                (isVideo ? icons.cameraOn : icons.callAnswer).font(.caption).foregroundStyle(.white)
             }
             .frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 1) {
@@ -193,7 +194,7 @@ public struct MessageBubbleView: View {
                                 } else {
                                     Color.black.opacity(0.3)
                                 }
-                                Image(systemName: "play.circle.fill").font(.system(size: 32)).foregroundStyle(.white)
+                                icons.playCircle.font(.system(size: 32)).foregroundStyle(.white)
                                 if let sec = message.fileDurationSec {
                                     VStack {
                                         Spacer()
@@ -216,7 +217,7 @@ public struct MessageBubbleView: View {
                                 } else {
                                     Color.black.opacity(0.3)
                                 }
-                                Image(systemName: "doc.richtext.fill").font(.system(size: 32)).foregroundStyle(.white)
+                                icons.pdfDocument.font(.system(size: 32)).foregroundStyle(.white)
                                 VStack {
                                     Spacer()
                                     HStack {
@@ -230,7 +231,7 @@ public struct MessageBubbleView: View {
                             .frame(width: 220, height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
                         } else {
                             HStack(spacing: 8) {
-                                Image(systemName: "paperclip")
+                                icons.attach
                                 VStack(alignment: .leading, spacing: 0) {
                                     Text(message.fileName ?? "File").font(.caption).lineLimit(1)
                                     if let bytes = message.fileSizeBytes { Text(RelayFormat.fileSize(bytes)).font(.caption2).opacity(0.7) }
@@ -247,7 +248,7 @@ public struct MessageBubbleView: View {
             HStack(spacing: 4) {
                 if message.editedAt != nil && !message.deleted { Text("edited").font(.caption2) }
                 Text(RelayFormat.time(message.createdAt)).font(.caption2)
-                if message.status == .sending { Image(systemName: "clock").font(.caption2) }
+                if message.status == .sending { icons.sending.font(.caption2) }
             }
             .opacity(0.7)
             // No .frame(maxWidth: .infinity) here — that used to force this row (and therefore

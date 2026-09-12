@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Round avatar: remote image when available, coloured initials otherwise.
 public struct AvatarView: View {
+    @Environment(\.relayTheme) private var theme
     let name: String?
     let url: String?
     let colorKey: String
@@ -29,7 +30,9 @@ public struct AvatarView: View {
     private var fallback: some View {
         let hue = RelayFormat.hue(for: colorKey)
         return ZStack {
-            Color(hue: hue, saturation: 0.45, brightness: 0.92)
+            Color(hue: hue, saturation: theme.avatarSaturation, brightness: theme.avatarLightness)
+            // Text tint is deliberately a distinct, darker variant of the same hue (for legibility
+            // against the lighter fill above), not the theme's fill saturation/brightness.
             Text(RelayFormat.initials(name))
                 .font(.system(size: size * 0.38, weight: .semibold))
                 .foregroundStyle(Color(hue: hue, saturation: 0.5, brightness: 0.35))

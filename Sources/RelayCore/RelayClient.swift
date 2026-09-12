@@ -16,6 +16,11 @@ public final class RelayClient {
     public let chat: ChatStore
     public private(set) var connection: ConnectionSnapshot = .idle
     public private(set) var me: RelayUser?
+    /// Per-project module gating from `GET /users/me`, defaulting to all-enabled before the
+    /// first successful `connect()`. Host apps building their own UI for actions the SDK doesn't
+    /// own directly (e.g. a call button — see `CallCenter.start`) should check this before
+    /// offering those actions.
+    public private(set) var modules: RelayModules = RelayModules()
 
     private let tokens: TokenSource
     private var socket: RelaySocket!
@@ -43,15 +48,16 @@ public final class RelayClient {
     public func connect() async throws -> RelayUser {
         async let userTask = resolveMe()
         try await socket.connect()
-        let user = try await userTask
+        let (user, resolvedModules) = try await userTask
         me = user
+        modules = resolvedModules
         chat.setMe(user)
         return user
     }
 
-    private func resolveMe() async throws -> RelayUser {
-        if let me { return me }
-        return try await api.me()
+    private func resolveMe() async throws -> (RelayUser, RelayModules) {
+        if let me { return (me, modules) }
+        return try await api.meWithModules()
     }
 
     /// Closes the connection and clears local state. Safe to call on sign-out.
@@ -59,6 +65,7 @@ public final class RelayClient {
         socket.close()
         chat.reset()
         me = nil
+        modules = RelayModules()
     }
 
     /// Call from the app's background transition: closes the socket AND tells the server
@@ -95,6 +102,15 @@ public final class RelayClient {
         case .disconnected:
             break
         case .event(let event):
+            if case .modulesUpdated(let newModules) = event {
+                // Project-wide module gating update, pushed live to every connected client
+                // (same delivery model as `presence`) whenever a super admin changes this
+                // project's flags. `handle(_:)` runs on the MainActor (RelayClient is
+                // @MainActor), so this mutation of the @Observable `modules` property is
+                // already on the main thread — SwiftUI views reading it (e.g. the composer's
+                // attach button, app-demo's call buttons) re-render automatically.
+                modules = newModules
+            }
             chat.apply(event)
             for listener in eventListeners.values { listener(event) }
         }

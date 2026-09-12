@@ -76,7 +76,9 @@ final class RelaySocket {
             guard self.wantOpen else { return }
             var components = URLComponents(url: self.config.gatewayURL, resolvingAgainstBaseURL: false)!
             components.queryItems = [URLQueryItem(name: "key", value: self.config.publicKey), URLQueryItem(name: "token", value: token)]
-            var request = URLRequest(url: components.url!)
+            let connectURL = components.url!
+            debugLog(self.config, "connecting to \(redactedURL(connectURL))")
+            var request = URLRequest(url: connectURL)
             // Same app-allowlist header as RelayAPI's REST calls (X-App-Bundle-Id) — the gateway
             // upgrade enforces it too, via a URLRequest since webSocketTask(with: URL) can't carry
             // custom headers.
@@ -104,6 +106,7 @@ final class RelaySocket {
         let wasReconnect = everConnected
         everConnected = true
         setState(ConnectionSnapshot(state: .connected, attempts: 0, lastError: nil))
+        debugLog(config, "connected")
         startPing(task)
         resumeWaiters()
         handler(.connected)
@@ -125,6 +128,7 @@ final class RelaySocket {
                     }
                     if let data, let event = RelayEvent.decode(data) {
                         if case .connected = event { self.markOpen(task) }
+                        debugLog(self.config, "event: \(event.name)\(Self.debugEventDetail(event))")
                         self.handler(.event(event))
                     }
                 } catch {
@@ -140,6 +144,7 @@ final class RelaySocket {
         guard self.task === task else { return }
         self.task = nil
         cancelTimers()
+        debugLog(config, "disconnected (code=\(code), reason=\(reason.isEmpty ? "<none>" : reason))")
         handler(.disconnected(code: code))
         guard wantOpen else { return }
         if code == 4401 || code == 4403 {
@@ -198,5 +203,33 @@ final class RelaySocket {
         let waiters = openContinuations
         openContinuations = []
         waiters.forEach { $0.resume(throwing: error) }
+    }
+
+    /// Only non-content identifiers already safe to log — never a message's text/media fields,
+    /// and never a user's displayName/avatarUrl. `modules_updated` gets its own line since
+    /// booleans aren't sensitive and are worth seeing at a glance.
+    private static func debugEventDetail(_ event: RelayEvent) -> String {
+        switch event {
+        case .chatMessage(let conversationId, let message, _):
+            return " (conversationId=\(conversationId), messageId=\(message.id))"
+        case .chatMessageUpdated(let conversationId, let message):
+            return " (conversationId=\(conversationId), messageId=\(message.id))"
+        case .chatRead(let conversationId, _, _):
+            return " (conversationId=\(conversationId))"
+        case .typing(let conversationId, _):
+            return " (conversationId=\(conversationId))"
+        case .modulesUpdated(let modules):
+            return " — modules updated: chat=\(modules.chat), audioCalls=\(modules.audioCalls), videoCalls=\(modules.videoCalls), chatAttachments=\(modules.chatAttachments), chatVoiceMessages=\(modules.chatVoiceMessages), push=\(modules.push)"
+        case .conversationCreated(let conversationId), .conversationDeleted(let conversationId), .conversationCleared(let conversationId):
+            return " (conversationId=\(conversationId))"
+        case .conversationUpdated(let conversationId, _, _):
+            return " (conversationId=\(conversationId))"
+        case .conversationMuted(let conversationId, _):
+            return " (conversationId=\(conversationId))"
+        case .membersAdded(let conversationId, _), .memberRemoved(let conversationId, _), .memberLeft(let conversationId, _):
+            return " (conversationId=\(conversationId))"
+        case .connected, .pong, .presence, .unknown:
+            return ""
+        }
     }
 }

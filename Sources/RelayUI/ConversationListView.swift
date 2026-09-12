@@ -38,6 +38,7 @@ public struct ConversationListView: View {
         }
         .task { await load() }
         .refreshable { await load() }
+        .relayTypography(theme)
     }
 
     private func load() async {

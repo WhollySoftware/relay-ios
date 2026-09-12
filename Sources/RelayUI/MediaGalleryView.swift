@@ -8,6 +8,7 @@ import SwiftUI
 struct MediaGalleryView: View {
     @Environment(RelayClient.self) private var client
     @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let conversationId: ConversationId
 
     private enum Tab { case media, docs }
@@ -98,7 +99,7 @@ struct MediaGalleryView: View {
                 Color.gray.opacity(0.15)
             }
             if m.imageUrl == nil {
-                Image(systemName: "play.fill")
+                icons.playFilled
                     .foregroundStyle(.white)
                     .padding(6)
                     .background(Circle().fill(Color.black.opacity(0.4)))
@@ -123,7 +124,7 @@ struct MediaGalleryView: View {
                     Section(group.label) {
                         ForEach(group.items) { m in
                             HStack(spacing: 12) {
-                                Image(systemName: m.audioUrl != nil ? "mic.fill" : "doc.fill")
+                                (m.audioUrl != nil ? icons.voiceMessage : icons.document)
                                     .frame(width: 28)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(m.fileName ?? (m.audioUrl != nil ? "Voice message" : "File"))

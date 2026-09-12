@@ -11,6 +11,9 @@ public enum RelayEvent: Sendable, Equatable {
     case chatRead(conversationId: ConversationId, userId: UserId, lastReadAt: Date)
     case typing(conversationId: ConversationId, userId: UserId)
     case presence(userId: UserId, online: Bool, lastSeenAt: Date?)
+    /// Project-wide: a super admin changed this project's module flags. Always carries the FULL,
+    /// current module set (not a partial patch) — same delivery model as `presence`.
+    case modulesUpdated(modules: RelayModules)
     case conversationCreated(conversationId: ConversationId)
     case conversationUpdated(conversationId: ConversationId, name: String?, photoUrl: String?)
     case conversationDeleted(conversationId: ConversationId)
@@ -31,6 +34,7 @@ public enum RelayEvent: Sendable, Equatable {
         case .chatRead: return "chat_read"
         case .typing: return "typing"
         case .presence: return "presence"
+        case .modulesUpdated: return "modules_updated"
         case .conversationCreated: return "conversation_created"
         case .conversationUpdated: return "conversation_updated"
         case .conversationDeleted: return "conversation_deleted"
@@ -59,6 +63,7 @@ public enum RelayEvent: Sendable, Equatable {
         let photoUrl: String?
         let userIds: [UserId]?
         let muted: Bool?
+        let modules: RelayModules?
     }
 
     public static func decode(_ data: Data) -> RelayEvent? {
@@ -83,6 +88,9 @@ public enum RelayEvent: Sendable, Equatable {
         case "presence":
             guard let u = raw.userId, let online = raw.online else { return nil }
             return .presence(userId: u, online: online, lastSeenAt: raw.lastSeenAt)
+        case "modules_updated":
+            guard let m = raw.modules else { return nil }
+            return .modulesUpdated(modules: m)
         case "conversation_created":
             guard let c = raw.conversationId else { return nil }
             return .conversationCreated(conversationId: c)

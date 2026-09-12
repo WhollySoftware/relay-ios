@@ -58,6 +58,15 @@ public final class CallCenter: NSObject {
     /// matching the 1:1 scalars above.
     public private(set) var remoteMicEnabledByUser: [UserId: Bool] = [:]
     public private(set) var remoteCameraEnabledByUser: [UserId: Bool] = [:]
+    /// Group-only: participants whose incoming audio THIS device has locally silenced — a
+    /// listener-side preference (e.g. "I don't want to hear C") that never reaches the network, so
+    /// nobody else's call is affected and it resets when the call ends.
+    public private(set) var locallyMutedUsers: Set<UserId> = []
+    public func toggleLocalMute(for userId: UserId) {
+        let muted = !locallyMutedUsers.contains(userId)
+        if muted { locallyMutedUsers.insert(userId) } else { locallyMutedUsers.remove(userId) }
+        peers[userId]?.setLocalMute(muted)
+    }
     public var errorMessage: String?
     /// True when the mic is not authorized (denied/restricted, or not-yet-determined and then
     /// denied when we prompted). Computed once, right around call start/answer — no live
@@ -140,6 +149,13 @@ public final class CallCenter: NSObject {
         config.maximumCallGroups = 1
         config.maximumCallsPerCallGroup = 1
         config.supportedHandleTypes = [.generic]
+        #if DEBUG
+        // Debug builds point at a ringtone filename that doesn't exist in the bundle — CallKit
+        // silently skips playback instead of erroring, so the native call UI still works exactly
+        // as in production (answer/decline, lock-screen call, CallKit history), it just doesn't
+        // audibly ring while iterating locally. Release builds leave this nil (system default).
+        config.ringtoneSound = "relay-call-silent-debug-only.caf"
+        #endif
         provider = CXProvider(configuration: config)
         #endif
         super.init()
@@ -161,6 +177,13 @@ public final class CallCenter: NSObject {
 
     // MARK: - Outgoing
 
+    /// Starts a call. `RelayCall` has no SDK-owned button for this — host apps wire their own UI
+    /// to this method (see `packages/ios/app-demo` for a reference implementation). This method
+    /// does NOT pre-emptively check `client.modules.audioCalls`/`.videoCalls` before starting —
+    /// if the relevant module is disabled for the project, the server call started below will
+    /// simply fail (403 `module_disabled`). Host apps should check `client.modules.audioCalls` /
+    /// `client.modules.videoCalls` before showing their own audio/video call buttons at all,
+    /// exactly like `MessageComposerView` hides its attach button when `chatAttachments` is off.
     public func start(conversation: Conversation, type: CallType) {
         // A group conversation has no single `peer` — this used to be the (accidental) gate that
         // hid calling for group conversations entirely; deriving participantIds from the member
@@ -188,6 +211,7 @@ public final class CallCenter: NSObject {
                 call = ActiveCall(id: res.callId, uuid: uuid, conversationId: conversation.id, peerId: isGroup ? displayPeerId : (peer?.userId ?? ""),
                                    peerName: isGroup ? conversation.title : peer?.displayName, type: type, phase: .outgoing,
                                    isGroup: isGroup, participantIds: isGroup ? groupParticipantIds : [peer?.userId ?? ""])
+                debugLog(client.config, "call \(res.callId) ringing (outgoing)")
                 reportOutgoingStarted(uuid: uuid, name: isGroup ? conversation.title : (peer?.displayName ?? peer?.userId ?? ""), video: type == .video)
                 scheduleRing(callId: res.callId)
                 if isGroup {
@@ -234,8 +258,10 @@ public final class CallCenter: NSObject {
                 speakerEnabled = type == .video
                 if let recipient = pendingAcceptRecipient, call?.phase == .connecting { pendingAcceptRecipient = nil; sendOffer(manager, callId: res.callId, targetUserId: recipient) }
             } catch let error as RelayError where error.status == 409 {
+                debugLog(client.config, "error starting call: \(error.localizedDescription)")
                 errorMessage = "They're already on another call."
             } catch {
+                debugLog(client.config, "error starting call: \(error.localizedDescription)")
                 errorMessage = "Couldn't start the call. Please try again."
             }
         }
@@ -248,6 +274,7 @@ public final class CallCenter: NSObject {
         let uuid = UUID()
         call = ActiveCall(id: callId, uuid: uuid, conversationId: conversationId, peerId: callerId, peerName: callerName, type: type, phase: .incoming,
                            isGroup: isGroup, participantIds: participantIds)
+        debugLog(client.config, "call \(callId) ringing (incoming)")
         reportIncoming(uuid: uuid, name: callerName ?? callerId, video: type == .video)
     }
 
@@ -288,6 +315,7 @@ public final class CallCenter: NSObject {
                 guard var live = call, live.uuid == uuid else { return }
                 live.phase = .connecting
                 call = live
+                debugLog(client.config, "call \(callId) answered")
                 scheduleConnect(callId: callId)
 
                 if isGroup {
@@ -341,9 +369,11 @@ public final class CallCenter: NSObject {
                 }
                 drainCandidates(into: m, callId: callId)
             } catch let error as RelayError where error.status == 409 {
+                debugLog(client.config, "error answering call \(callId): \(error.localizedDescription)")
                 manager?.close()
                 if stillMine(uuid) { finish(failed: false) }
             } catch {
+                debugLog(client.config, "error answering call \(callId): \(error.localizedDescription)")
                 manager?.close()
                 guard stillMine(uuid) else { return }
                 _ = try? await client.api.endCall(callId, reason: "failed")
@@ -417,6 +447,8 @@ public final class CallCenter: NSObject {
 
     private func iceServers() async -> [PeerConnectionManager.IceServer] {
         guard let turn = try? await client.api.turnCredentials() else { return [] }
+        // Count only — NEVER log turn.username/turn.credential.
+        debugLog(client.config, "TURN credentials fetched (\(turn.urls.count) ICE server URLs)")
         return [.init(urls: turn.urls, username: turn.username, credential: turn.credential)]
     }
 
@@ -448,7 +480,10 @@ public final class CallCenter: NSObject {
                 case .connected:
                     self.connectTask?.cancel(); self.graceTask?.cancel(); self.restartTask?.cancel()
                     m.noteConnected()
-                    if var c = self.call, c.phase != .active { c.phase = .active; c.startedAt = c.startedAt ?? Date(); self.call = c }
+                    if var c = self.call, c.phase != .active {
+                        c.phase = .active; c.startedAt = c.startedAt ?? Date(); self.call = c
+                        debugLog(self.client.config, "call \(callId) active")
+                    }
                     self.reportConnected()
                     PeerConnectionManager.setSpeaker(self.speakerEnabled)
                 case .disconnected:
@@ -475,6 +510,7 @@ public final class CallCenter: NSObject {
         remoteVideoTracks[userId] = nil
         remoteMicEnabledByUser[userId] = nil
         remoteCameraEnabledByUser[userId] = nil
+        locallyMutedUsers.remove(userId)
         pendingGroupCandidates[userId] = nil
     }
 
@@ -565,7 +601,10 @@ public final class CallCenter: NSObject {
     }
 
     func finish(failed: Bool) {
-        if let call { reportEnded(uuid: call.uuid, failed: failed) }
+        if let call {
+            debugLog(client.config, "call \(call.id) ended (failed=\(failed))")
+            reportEnded(uuid: call.uuid, failed: failed)
+        }
         cleanup()
     }
 
@@ -579,6 +618,7 @@ public final class CallCenter: NSObject {
         call = nil; localVideoTrack = nil; remoteVideoTrack = nil; remoteVideoTracks = [:]
         micEnabled = true; cameraEnabled = true; speakerEnabled = false
         remoteMicEnabled = true; remoteCameraEnabled = true; remoteMicEnabledByUser = [:]; remoteCameraEnabledByUser = [:]
+        locallyMutedUsers = []
         localMicPermissionDenied = false; localCameraPermissionDenied = false
     }
 
@@ -655,7 +695,11 @@ public final class CallCenter: NSObject {
             if let mic { remoteMicEnabledByUser[senderId] = mic }
         case .participantJoined(let callId, _, _, let participantIds):
             // The joiner offers to us (point 3) — we just refresh the roster and wait for their offer.
-            if var c = call, c.id == callId { c.participantIds = participantIds; call = c }
+            // Someone answered — stop the "nobody's answering" ring timeout (mirrors .accepted for
+            // 1:1). Without this a group call the caller placed self-destructs at the ring timeout
+            // even when other members are actively on it, since nothing else moves the caller's
+            // own phase off .outgoing until ITS OWN peer connection reaches connected.
+            if var c = call, c.id == callId { c.participantIds = participantIds; call = c; ringTask?.cancel() }
         case .participantDeclined(let callId, _, let userId):
             // Informational only — doesn't end the call. Drop them from the roster so the UI
             // doesn't keep showing a name that will never join.
@@ -740,7 +784,9 @@ public final class CallCenter: NSObject {
             let content = UNMutableNotificationContent()
             content.title = name
             content.body = "Incoming \(video ? "video" : "audio") call"
+            #if !DEBUG
             content.sound = .default
+            #endif
             content.userInfo = ["relayCallUUID": uuid.uuidString]
             let request = UNNotificationRequest(identifier: "relay-call-\(uuid.uuidString)", content: content, trigger: nil)
             center.add(request)

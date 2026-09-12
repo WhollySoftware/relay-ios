@@ -8,6 +8,7 @@ import SwiftUI
 /// Everything inside reads the client from the SwiftUI environment, so you can also compose
 /// `ConversationListView` / `MessageThreadView` yourself and inject it with `.environment(relay)`.
 public struct RelayChatView: View {
+    @Environment(\.relayTheme) private var theme
     private let client: RelayClient
     @State private var path: [ConversationId] = []
 
@@ -26,6 +27,7 @@ public struct RelayChatView: View {
         .task {
             if client.connection.state == .idle || client.connection.state == .closed { _ = try? await client.connect() }
         }
+        .relayTypography(theme)
     }
 
     /// Programmatically open a thread (e.g. from a push notification tap).

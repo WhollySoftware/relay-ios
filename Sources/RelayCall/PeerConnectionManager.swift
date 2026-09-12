@@ -57,6 +57,12 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
     private var pc: RTCPeerConnection?
     // Not owned — LocalMedia owns acquisition/teardown; this class only attaches/reads.
     private(set) var localVideoTrack: RTCVideoTrack?
+    // This peer's incoming audio — kept so setLocalMute(_:) can silence it for THIS device only
+    // (an `isEnabled = false` on the receiving track never reaches the network, so nobody else's
+    // call is affected — see CallCenter.toggleLocalMute).
+    private var remoteAudioTrack: RTCAudioTrack?
+    private var locallyMuted = false
+    func setLocalMute(_ muted: Bool) { locallyMuted = muted; remoteAudioTrack?.isEnabled = !muted }
     private var pendingRemoteCandidates: [RTCIceCandidate] = []
     private var remoteDescriptionSet = false
     private(set) var isOfferer = false
@@ -185,6 +191,7 @@ extension PeerConnectionManager: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {
         if let track = rtpReceiver.track as? RTCVideoTrack { onRemoteVideoTrack?(track) }
+        if let track = rtpReceiver.track as? RTCAudioTrack { remoteAudioTrack = track; track.isEnabled = !locallyMuted }
     }
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}

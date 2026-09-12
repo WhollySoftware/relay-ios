@@ -20,6 +20,44 @@ public struct RelayUser: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// Per-project module gating, returned as a sibling of `user` from `GET /users/me`. Host apps
+/// (and `CallCenter`) should check the relevant flag before offering an action the module
+/// disables — e.g. a host's own call-button UI should check `audioCalls`/`videoCalls` before
+/// showing those buttons, since `CallCenter.start(conversation:type:)` does not pre-emptively
+/// block the call itself and will simply fail server-side (403 `module_disabled`) if invoked
+/// while disabled.
+public struct RelayModules: Codable, Sendable, Equatable {
+    public var chat: Bool = true
+    public var audioCalls: Bool = true
+    public var videoCalls: Bool = true
+    public var chatAttachments: Bool = true
+    public var chatVoiceMessages: Bool = true
+    public var push: Bool = true
+
+    public init() {}
+
+    public init(
+        chat: Bool = true, audioCalls: Bool = true, videoCalls: Bool = true,
+        chatAttachments: Bool = true, chatVoiceMessages: Bool = true, push: Bool = true
+    ) {
+        self.chat = chat; self.audioCalls = audioCalls; self.videoCalls = videoCalls
+        self.chatAttachments = chatAttachments; self.chatVoiceMessages = chatVoiceMessages; self.push = push
+    }
+
+    // Custom decoding: an older service (or a project predating these keys) may omit some or all
+    // fields entirely. Each key independently falls back to `true` (module enabled) rather than
+    // failing to decode, so a partial/missing `modules` object never breaks connect().
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        chat = try c.decodeIfPresent(Bool.self, forKey: .chat) ?? true
+        audioCalls = try c.decodeIfPresent(Bool.self, forKey: .audioCalls) ?? true
+        videoCalls = try c.decodeIfPresent(Bool.self, forKey: .videoCalls) ?? true
+        chatAttachments = try c.decodeIfPresent(Bool.self, forKey: .chatAttachments) ?? true
+        chatVoiceMessages = try c.decodeIfPresent(Bool.self, forKey: .chatVoiceMessages) ?? true
+        push = try c.decodeIfPresent(Bool.self, forKey: .push) ?? true
+    }
+}
+
 public struct GroupMember: Codable, Sendable, Equatable, Identifiable {
     public var id: UserId { userId }
     public let userId: UserId

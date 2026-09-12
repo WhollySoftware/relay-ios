@@ -496,8 +496,8 @@ public final class ChatStore {
             patch(conversationId) { $0.muted = muted }
         case .membersAdded(let conversationId, _), .memberRemoved(let conversationId, _), .memberLeft(let conversationId, _):
             Task { await refreshConversation(conversationId) }
-        case .pong, .unknown:
-            break
+        case .pong, .unknown, .modulesUpdated:
+            break // handled by RelayClient directly (updates RelayClient.modules)
         }
     }
 

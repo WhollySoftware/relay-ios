@@ -88,6 +88,7 @@ public struct LinkPreviewCard: View {
 /// renders its own `LinkPreviewCard` from the same URL once the message lands.
 struct ComposeLinkPreviewCard: View {
     @Environment(RelayClient.self) private var client
+    @Environment(\.relayIcons) private var icons
     let url: String
     var onDismiss: () -> Void
     @State private var preview: LinkPreview?
@@ -113,7 +114,7 @@ struct ComposeLinkPreviewCard: View {
                     }
                     Spacer(minLength: 0)
                     Button(action: onDismiss) {
-                        Image(systemName: "xmark").font(.caption).foregroundStyle(.secondary)
+                        icons.dismiss.font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(8)

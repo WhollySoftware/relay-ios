@@ -11,12 +11,18 @@ private let maxGroupPhotoBytes = 1_800_000
 struct GroupDetailView: View {
     @Environment(RelayClient.self) private var client
     @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     @Environment(\.dismiss) private var dismiss
     let conversationId: ConversationId
 
-    /// Invoked when "Add people" is tapped; the host owns the user-picker UI. Return the ids to
-    /// add, or nil/empty to cancel. Omitted hides the "Add people" row.
+    /// Invoked when "Add people" is tapped and `onSearchPeople` is NOT supplied; the host owns the
+    /// user-picker UI. Return the ids to add, or nil/empty to cancel. Omitted (with `onSearchPeople`
+    /// also omitted) hides the "Add people" row.
     var onPickAdd: (() async -> [UserId]?)?
+
+    /// Invoked to search for people to add. When supplied, "Add people" opens the SDK-owned
+    /// `AddParticipantsView` instead of calling `onPickAdd` directly.
+    var onSearchPeople: ((String) async -> [RelayUser])?
 
     @State private var participants: [Participant]?
     @State private var creatorId: UserId?
@@ -31,6 +37,7 @@ struct GroupDetailView: View {
     @State private var confirmLeave = false
     @State private var confirmClear = false
     @State private var showMedia = false
+    @State private var showingAddParticipants = false
 
     @State private var editing = false
     @State private var editName = ""
@@ -59,7 +66,7 @@ struct GroupDetailView: View {
                         MediaGalleryView(conversationId: conversationId)
                     } label: {
                         HStack(spacing: 12) {
-                            iconBadge("photo.on.rectangle")
+                            iconBadge(icons.photo)
                             Text("Media, links & docs")
                         }
                     }
@@ -69,7 +76,7 @@ struct GroupDetailView: View {
                         set: { newValue in Task { await toggleMute(newValue) } }
                     )) {
                         HStack(spacing: 12) {
-                            iconBadge("bell.slash")
+                            iconBadge(icons.muteNotifications)
                             Text("Mute notifications")
                         }
                     }
@@ -79,7 +86,7 @@ struct GroupDetailView: View {
                         confirmClear = true
                     } label: {
                         HStack(spacing: 12) {
-                            iconBadge("trash")
+                            iconBadge(icons.delete)
                             Text("Clear chat")
                         }
                     }
@@ -89,7 +96,7 @@ struct GroupDetailView: View {
                         confirmLeave = true
                     } label: {
                         HStack(spacing: 12) {
-                            iconBadge("rectangle.portrait.and.arrow.right")
+                            iconBadge(icons.leaveGroup)
                             Text("Leave group")
                         }
                     }
@@ -97,14 +104,18 @@ struct GroupDetailView: View {
                 }
 
                 Section {
-                    if isAdmin, onPickAdd != nil {
+                    if isAdmin, onPickAdd != nil || onSearchPeople != nil {
                         Button {
-                            Task { await addPeople() }
+                            if onSearchPeople != nil {
+                                showingAddParticipants = true
+                            } else {
+                                Task { await addPeople() }
+                            }
                         } label: {
                             HStack(spacing: 12) {
                                 ZStack {
                                     Circle().fill(Color.gray.opacity(0.15)).frame(width: 36, height: 36)
-                                    Image(systemName: "plus")
+                                    icons.addPeople
                                 }
                                 Text("Add people")
                             }
@@ -177,6 +188,13 @@ struct GroupDetailView: View {
             } message: {
                 Text("This clears the chat history on your side only. Other members keep theirs.")
             }
+            .sheet(isPresented: $showingAddParticipants) {
+                if let onSearchPeople {
+                    AddParticipantsView(conversationId: conversationId, onSearchPeople: onSearchPeople) {
+                        await load()
+                    }
+                }
+            }
         }
     }
 
@@ -209,7 +227,7 @@ struct GroupDetailView: View {
             PhotosPicker(selection: $editPhotoItem, matching: .images) {
                 ZStack(alignment: .bottomTrailing) {
                     AvatarView(name: editName.isEmpty ? "Group" : editName, url: editPhoto, colorKey: "g:\(conversationId)", size: 72)
-                    Image(systemName: "pencil.circle.fill")
+                    icons.editPhoto
                         .font(.system(size: 20))
                         .foregroundStyle(.white, theme.accent)
                 }
@@ -239,10 +257,10 @@ struct GroupDetailView: View {
         .listRowBackground(Color.clear)
     }
 
-    private func iconBadge(_ systemName: String) -> some View {
+    private func iconBadge(_ icon: Image) -> some View {
         ZStack {
             Circle().fill(Color.gray.opacity(0.15)).frame(width: 32, height: 32)
-            Image(systemName: systemName).font(.system(size: 14))
+            icon.font(.system(size: 14))
         }
     }
 

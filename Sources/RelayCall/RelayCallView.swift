@@ -9,6 +9,7 @@ import UIKit
 /// on other platforms, or if you don't use CallKit, show `IncomingCallBanner`). Mount
 /// `RelayCallOverlay` once at your root.
 public struct RelayCallOverlay: View {
+    @Environment(\.relayTheme) private var theme
     let center: CallCenter
     public init(center: CallCenter) { self.center = center }
     public var body: some View {
@@ -35,12 +36,13 @@ public struct RelayCallOverlay: View {
             }
             if let message = center.errorMessage {
                 VStack {
-                    Text(message).font(.footnote).padding(10).background(.red.opacity(0.9)).foregroundStyle(.white).clipShape(RoundedRectangle(cornerRadius: 10))
+                    Text(message).font(.footnote).padding(10).background(theme.danger.opacity(0.9)).foregroundStyle(theme.accentForeground).clipShape(RoundedRectangle(cornerRadius: 10))
                         .onTapGesture { center.errorMessage = nil }
                     Spacer()
                 }.padding(.top, 12)
             }
         }
+        .relayTypography(theme)
     }
 }
 
@@ -49,6 +51,8 @@ public struct RelayCallOverlay: View {
 /// audible/visible to this device, but this device is silently sending nothing. Doesn't block the
 /// call controls; just a dismiss-free hint with a shortcut to Settings.
 struct PermissionBanner: View {
+    @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let micDenied: Bool
     let cameraDenied: Bool
 
@@ -64,7 +68,7 @@ struct PermissionBanner: View {
     var body: some View {
         if micDenied || cameraDenied {
             HStack(spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+                icons.callWarning.foregroundStyle(.yellow)
                 Text(message).font(.caption).foregroundStyle(.white)
                 Spacer(minLength: 8)
                 #if os(iOS)
@@ -79,7 +83,7 @@ struct PermissionBanner: View {
                 #endif
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.black.opacity(0.55))
+            .background(theme.callScrimStart.opacity(0.55))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal)
         }
@@ -87,6 +91,8 @@ struct PermissionBanner: View {
 }
 
 public struct IncomingCallBanner: View {
+    @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let center: CallCenter
     let call: CallCenter.ActiveCall
     public var body: some View {
@@ -94,19 +100,22 @@ public struct IncomingCallBanner: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading) {
                     Text(call.peerName ?? call.peerId).bold()
-                    Text("Incoming \(call.type.rawValue) call…").font(.caption).foregroundStyle(.secondary)
+                    Text("Incoming \(call.type.rawValue) call…").font(.caption).foregroundStyle(theme.secondaryText)
                 }
                 Spacer()
-                Button { center.decline() } label: { Image(systemName: "xmark").padding(10).background(Circle().fill(.red)).foregroundStyle(.white) }.buttonStyle(.plain)
-                Button { center.answer() } label: { Image(systemName: call.type == .video ? "video.fill" : "phone.fill").padding(10).background(Circle().fill(.green)).foregroundStyle(.white) }.buttonStyle(.plain)
+                Button { center.decline() } label: { icons.callDecline.padding(10).background(Circle().fill(theme.danger)).foregroundStyle(theme.accentForeground) }.buttonStyle(.plain)
+                Button { center.answer() } label: { (call.type == .video ? icons.cameraOn : icons.callAnswer).padding(10).background(Circle().fill(theme.online)).foregroundStyle(theme.accentForeground) }.buttonStyle(.plain)
             }
             .padding(12).background(.regularMaterial).clipShape(RoundedRectangle(cornerRadius: 16)).padding()
             Spacer()
         }
+        .relayTypography(theme)
     }
 }
 
 public struct RelayCallView: View {
+    @Environment(\.relayTheme) private var theme
+    @Environment(\.relayIcons) private var icons
     let center: CallCenter
     let call: CallCenter.ActiveCall
     public init(center: CallCenter, call: CallCenter.ActiveCall) { self.center = center; self.call = call }
@@ -127,12 +136,12 @@ public struct RelayCallView: View {
 
     public var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            theme.callScrimStart.ignoresSafeArea()
             if showRemoteVideo, let remote = center.remoteVideoTrack {
                 VideoRenderView(track: remote).ignoresSafeArea()
             } else {
                 VStack(spacing: 14) {
-                    Circle().fill(Color.gray.opacity(0.4)).frame(width: 110, height: 110)
+                    Circle().fill(Color(hue: avatarHue(for: call.peerId), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 110, height: 110)
                         .overlay(Text(String((call.peerName ?? call.peerId).prefix(2)).uppercased()).font(.largeTitle.bold()).foregroundStyle(.white))
                     Text(call.peerName ?? call.peerId).font(.title2.bold()).foregroundStyle(.white)
                     statusView
@@ -142,12 +151,12 @@ public struct RelayCallView: View {
                 HStack {
                     if !center.remoteMicEnabled {
                         HStack(spacing: 5) {
-                            Image(systemName: "mic.slash.fill")
+                            icons.micOff
                             Text("Muted").font(.caption).fontWeight(.semibold)
                         }
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(Capsule().fill(.black.opacity(0.45)))
+                        .background(Capsule().fill(theme.callScrimStart.opacity(0.45)))
                         .padding(.leading)
                     }
                     Spacer()
@@ -167,20 +176,20 @@ public struct RelayCallView: View {
                             VideoRenderView(track: local).opacity(center.cameraEnabled ? 1 : 0)
                             if !center.cameraEnabled {
                                 VStack(spacing: 4) {
-                                    Circle().fill(Color.gray.opacity(0.5)).frame(width: 36, height: 36)
+                                    Circle().fill(Color(hue: avatarHue(for: center.client.userId ?? "you"), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 36, height: 36)
                                         .overlay(Text(String((center.client.me?.displayName ?? "You").prefix(2)).uppercased()).font(.caption.bold()).foregroundStyle(.white))
                                     Text(center.client.me?.displayName ?? "You").font(.caption2.bold()).foregroundStyle(.white.opacity(0.85)).lineLimit(1)
                                 }
                             }
                         }
-                        .frame(width: 100, height: 150).background(Color(white: 0.12)).clipShape(RoundedRectangle(cornerRadius: 14)).padding()
+                        .frame(width: 100, height: 150).background(theme.callScrimEnd).clipShape(RoundedRectangle(cornerRadius: 14)).padding()
                     }
                 }
                 HStack(spacing: 24) {
-                    control(center.micEnabled ? "mic.fill" : "mic.slash.fill", on: center.micEnabled) { center.toggleMic() }
-                    if call.type == .video { control(center.cameraEnabled ? "video.fill" : "video.slash.fill", on: center.cameraEnabled) { center.toggleCamera() } }
-                    control(center.speakerEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill", on: !center.speakerEnabled) { center.toggleSpeaker() }
-                    Button { center.hangUp() } label: { Image(systemName: "phone.down.fill").font(.title2).frame(width: 64, height: 64).background(Circle().fill(.red)).foregroundStyle(.white) }.buttonStyle(.plain)
+                    control(center.micEnabled ? icons.micOn : icons.micOff, on: center.micEnabled) { center.toggleMic() }
+                    if call.type == .video { control(center.cameraEnabled ? icons.cameraOn : icons.cameraOff, on: center.cameraEnabled) { center.toggleCamera() } }
+                    control(center.speakerEnabled ? icons.speakerOn : icons.speakerOff, on: !center.speakerEnabled) { center.toggleSpeaker() }
+                    Button { center.hangUp() } label: { icons.callEnd.font(.title2).frame(width: 64, height: 64).background(Circle().fill(theme.danger)).foregroundStyle(theme.accentForeground) }.buttonStyle(.plain)
                 }
                 .padding(.bottom, 40)
             }
@@ -198,13 +207,24 @@ public struct RelayCallView: View {
         }
     }
 
-    private func control(_ symbol: String, on: Bool, action: @escaping () -> Void) -> some View {
+    // `on` here means "not the highlighted/active toggle state" (see call sites) — this is a
+    // neutral light/dark control chrome over video, not a brand color, so it stays plain
+    // white/black rather than reading from the theme.
+    private func control(_ icon: Image, on: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.title2).frame(width: 64, height: 64)
+            icon.font(.title2).frame(width: 64, height: 64)
                 .background(Circle().fill(on ? Color.white.opacity(0.18) : Color.white))
                 .foregroundStyle(on ? Color.white : Color.black)
         }.buttonStyle(.plain)
     }
+}
+
+/// Stable per-key hue for a fallback call avatar — mirrors `RelayFormat.hue(for:)` in RelayUI
+/// (duplicated rather than shared, since RelayCall intentionally doesn't depend on RelayUI).
+func avatarHue(for key: String) -> Double {
+    var h: UInt32 = 0
+    for u in key.utf8 { h = h &* 31 &+ UInt32(u) }
+    return Double(h % 360) / 360
 }
 
 #if os(iOS)

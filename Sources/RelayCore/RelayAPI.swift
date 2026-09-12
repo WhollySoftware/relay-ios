@@ -37,14 +37,18 @@ public final class RelayAPI: Sendable {
             request.httpBody = try RelayJSON.encoder.encode(body)
         }
 
+        debugLog(config, "-> \(method) \(path)")
+
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await config.session.data(for: request)
         } catch {
+            debugLog(config, "error: \(method) \(path) — \(error.localizedDescription)")
             throw RelayError.network(error.localizedDescription)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        debugLog(config, "<- \(method) \(path) \(status)")
         if status == 401 && retryOn401 {
             // Tokens live 15 minutes — refresh once and retry.
             _ = try await tokens.refresh()
@@ -65,12 +69,21 @@ public final class RelayAPI: Sendable {
 
     // MARK: - Users
 
-    private struct UserEnvelope: Decodable { let user: RelayUser }
+    private struct UserEnvelope: Decodable {
+        let user: RelayUser
+        let modules: RelayModules?
+    }
     private struct UsersEnvelope: Decodable { let users: [RelayUser] }
 
     public func me() async throws -> RelayUser {
+        try await meWithModules().0
+    }
+
+    /// Same call as `me()`, also returning the sibling `modules` field (module gating flags).
+    /// Missing/partial `modules` decodes to all-enabled defaults — see `RelayModules`.
+    public func meWithModules() async throws -> (RelayUser, RelayModules) {
         let env: UserEnvelope = try await request("GET", "/users/me")
-        return env.user
+        return (env.user, env.modules ?? RelayModules())
     }
 
     /// Resolve names/avatars/presence for up to 100 of your own user ids.
