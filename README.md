@@ -14,17 +14,11 @@ Requires iOS 17 (SwiftUI `@Observable`). Xcode 15+.
 
 This is a standard Swift Package pinned by git tag — nothing binary or pre-built, so Xcode
 resolves and builds it like any other SPM dependency. The repo (`WhollySoftware/relay-ios`) is
-**private**; nothing is published to a public index, and no secret ever lives in the package
-itself — access is controlled entirely by GitHub repo permissions.
+**public** — no GitHub account, invite, or token needed to add it. No secret ever lives in the
+package itself: your actual access to the Relay service is controlled entirely by your project's
+`publicKey`/`secretKey`, not by anything to do with fetching the SDK's source.
 
-**1. Get access.** Ask WhollySoftware for a collaborator invite (or org team membership) on
-`relay-ios` with read access. Accept it with the GitHub account Xcode is already signed in as
-(Xcode → Settings → Accounts), or configure a fine-scoped
-[personal access token](https://github.com/settings/tokens) (`repo` read scope only) as a git
-credential — either way, the credential lives in your own keychain/git config, never in this
-repo or in your app's source.
-
-**2. Add the package.** Xcode → *File → Add Package Dependencies…* → paste
+**Add the package.** Xcode → *File → Add Package Dependencies…* → paste
 `https://github.com/WhollySoftware/relay-ios.git` → pick a version rule (**Up to Next Major**
 from the latest tag is recommended so you get fixes without breaking changes) → add the
 `RelayUI` product (and `RelayCore` alone if you only want the headless client; `RelayCall` if you
