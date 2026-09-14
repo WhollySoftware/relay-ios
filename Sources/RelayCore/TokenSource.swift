@@ -45,4 +45,6 @@ actor TokenSource {
 
     func set(_ value: String) { current = value }
     func peek() -> String? { current }
+    /// Drops the cached token (sign-out) so a client reused afterwards can never send the previous one.
+    func clear() { current = nil }
 }

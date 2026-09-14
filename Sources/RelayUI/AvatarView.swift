@@ -14,7 +14,7 @@ public struct AvatarView: View {
 
     public var body: some View {
         Group {
-            if let url, let u = URL(string: url) {
+            if let u = RelayFormat.safeAttachmentURL(url) {
                 AsyncImage(url: u) { phase in
                     if let image = phase.image { image.resizable().scaledToFill() } else { fallback }
                 }

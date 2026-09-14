@@ -58,6 +58,30 @@ public enum RelayFormat {
         return url.isEmpty ? nil : url
     }
 
+    /// Attachment/avatar URLs on a message are strings another client put there. The service only
+    /// admits `http(s)://` and `data:` at send time, but a message that predates that check, a
+    /// different client build, or a compromised host backend can still deliver anything — and a
+    /// `Link` hands whatever it gets to `openURL` (`tel:`, `facetime:`, `shortcuts://`, another
+    /// app's scheme), while `AsyncImage` given `file://` would render an app-private file in a
+    /// bubble. Only these three schemes are ever opened or loaded.
+    public static func isSafeAttachmentURL(_ url: URL) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "http", "https", "data": return true
+        default: return false
+        }
+    }
+
+    /// `URL(string:)` plus the scheme check above — nil for anything that must not be opened/loaded.
+    public static func safeAttachmentURL(_ string: String?) -> URL? {
+        guard let string, let url = URL(string: string), isSafeAttachmentURL(url) else { return nil }
+        return url
+    }
+
+    /// "m:ss", used by the voice-recorder timer, the pending-attachment preview, and playback.
+    public static func duration(_ seconds: Int) -> String {
+        "\(seconds / 60):\(String(format: "%02d", seconds % 60))"
+    }
+
     public static func fileSize(_ bytes: Int) -> String {
         if bytes < 1024 { return "\(bytes) B" }
         if bytes < 1024 * 1024 { return String(format: "%.0f KB", Double(bytes) / 1024) }

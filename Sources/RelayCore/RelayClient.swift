@@ -66,6 +66,8 @@ public final class RelayClient {
         chat.reset()
         me = nil
         modules = RelayModules()
+        let tokens = self.tokens
+        Task { await tokens.clear() } // sign-out: never send the previous user's token again
     }
 
     /// Call from the app's background transition: closes the socket AND tells the server

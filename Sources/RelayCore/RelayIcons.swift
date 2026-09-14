@@ -45,8 +45,13 @@ public struct RelayIcons: Sendable {
     public var playCircle = Image(systemName: "play.circle.fill")
     /// Message-bubble "sending…" clock.
     public var sending = Image(systemName: "clock")
-    /// Voice-message row icon in the media gallery's Docs tab.
+    /// Voice-message row icon in the media gallery's Docs tab, the composer's record-voice
+    /// trigger, and the pending-attachment preview icon.
     public var voiceMessage = Image(systemName: "mic.fill")
+    /// Composer's stop-recording button.
+    public var stopRecording = Image(systemName: "stop.fill")
+    /// Voice-message bubble's play/pause toggle (paired with `playFilled` for the play state).
+    public var pauseFilled = Image(systemName: "pause.fill")
 
     // MARK: Message receipts (MessageBubbleView)
     public var checkSent = Image(systemName: "checkmark")

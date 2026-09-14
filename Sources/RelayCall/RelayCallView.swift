@@ -43,6 +43,21 @@ public struct RelayCallOverlay: View {
             }
         }
         .relayTypography(theme)
+        // Whatever put a call on screen — a call button, a host calling center.start(), or a ring
+        // arriving mid-typing — the keyboard must go first: left up, it hides the incoming banner's
+        // Answer/Decline row and pushes the in-call controls off the bottom. Keyed on the call id so
+        // it fires once per call, not on every phase change.
+        .onChange(of: center.call?.id, initial: true) { _, id in
+            if id != nil { dismissKeyboard() }
+        }
+    }
+
+    private func dismissKeyboard() {
+        #if os(iOS)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #else
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        #endif
     }
 }
 

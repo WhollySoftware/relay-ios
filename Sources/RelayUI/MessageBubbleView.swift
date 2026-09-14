@@ -169,25 +169,23 @@ public struct MessageBubbleView: View {
             if message.deleted {
                 Text("This message was deleted").italic().opacity(0.7)
             } else {
-                if let image = message.imageUrl, let url = URL(string: image) {
+                if let url = RelayFormat.safeAttachmentURL(message.imageUrl) {
                     AsyncImage(url: url) { phase in
                         if let img = phase.image { img.resizable().scaledToFit() } else { ProgressView() }
                     }
                     .frame(maxWidth: 240, maxHeight: 240)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                if let audio = message.audioUrl, let url = URL(string: audio) {
-                    Link(destination: url) {
-                        Label(message.audioDurationSec.map { "Voice message · \($0 / 60):\(String(format: "%02d", $0 % 60))" } ?? "Voice message", systemImage: "waveform")
-                    }
+                if let audio = message.audioUrl {
+                    VoiceMessageRow(messageId: message.id, audioUrl: audio, durationSec: message.audioDurationSec)
                 }
-                if let file = message.fileUrl, let url = URL(string: file) {
+                if let url = RelayFormat.safeAttachmentURL(message.fileUrl) {
                     let isVideo = (message.fileMime ?? "").hasPrefix("video/")
                     let isPdf = (message.fileMime ?? "") == "application/pdf" && message.fileThumbnailUrl != nil
                     Link(destination: url) {
                         if isVideo {
                             ZStack {
-                                if let thumb = message.fileThumbnailUrl, let thumbUrl = URL(string: thumb) {
+                                if let thumbUrl = RelayFormat.safeAttachmentURL(message.fileThumbnailUrl) {
                                     AsyncImage(url: thumbUrl) { phase in
                                         if let img = phase.image { img.resizable().scaledToFill() } else { Color.black.opacity(0.3) }
                                     }
@@ -210,7 +208,7 @@ public struct MessageBubbleView: View {
                             .frame(width: 220, height: 140).clipShape(RoundedRectangle(cornerRadius: 10))
                         } else if isPdf {
                             ZStack {
-                                if let thumb = message.fileThumbnailUrl, let thumbUrl = URL(string: thumb) {
+                                if let thumbUrl = RelayFormat.safeAttachmentURL(message.fileThumbnailUrl) {
                                     AsyncImage(url: thumbUrl) { phase in
                                         if let img = phase.image { img.resizable().scaledToFill() } else { Color.black.opacity(0.3) }
                                     }
@@ -262,5 +260,35 @@ public struct MessageBubbleView: View {
             if message.status == .failed { RoundedRectangle(cornerRadius: theme.cornerRadius, style: .continuous).stroke(theme.danger, lineWidth: 1) }
         }
         .frame(maxWidth: 300, alignment: isOwn ? .trailing : .leading)
+    }
+}
+
+/// A voice-message bubble's play/pause + elapsed-or-duration row, backed by the single shared
+/// `ChatAudioPlayer` (so playing one bubble stops any other that's playing). Mirrors Android's
+/// `VoiceMessageRow` composable.
+public struct VoiceMessageRow: View {
+    @Environment(\.relayIcons) private var icons
+    let messageId: MessageId
+    let audioUrl: String
+    let durationSec: Int?
+    private let player = ChatAudioPlayer.shared
+
+    public init(messageId: MessageId, audioUrl: String, durationSec: Int?) {
+        self.messageId = messageId
+        self.audioUrl = audioUrl
+        self.durationSec = durationSec
+    }
+
+    public var body: some View {
+        let playing = player.isPlaying(messageId)
+        let seconds = playing ? player.elapsedSeconds : (durationSec ?? 0)
+        Button { player.toggle(messageId: messageId, audioUrl: audioUrl) } label: {
+            HStack(spacing: 6) {
+                (playing ? icons.pauseFilled : icons.playFilled)
+                Text(RelayFormat.duration(seconds)).font(.system(size: 13)).monospacedDigit()
+            }
+        }
+        .buttonStyle(.plain)
+        .onDisappear { if player.isPlaying(messageId) { player.stop() } }
     }
 }

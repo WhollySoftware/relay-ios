@@ -7,10 +7,9 @@ import Foundation
 /// same way." An iOS Simulator can reach the Mac's `localhost` directly, so no host-machine IP
 /// juggling is needed; a physical device would need the Mac's LAN IP instead.
 ///
-/// If you don't want to run the Node token server at all, see `LocalTokenMinter` below for a
-/// same-process fallback that talks to the Relay service directly with a hardcoded secret key —
-/// only ever appropriate for a throwaway demo, never for a real app (the secret key must never
-/// ship inside a client binary).
+/// There is deliberately no in-app fallback that mints tokens with the secret key: the `sk_` key
+/// must never ship inside a client binary, so the reference for "the backend part" is only ever
+/// `sample-apps/web-demo/token-server.mjs`.
 enum TokenServerError: LocalizedError {
     case unreachable(String)
     case badResponse

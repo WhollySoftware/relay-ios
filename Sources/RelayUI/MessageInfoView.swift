@@ -71,13 +71,13 @@ struct MessageInfoView: View {
     @ViewBuilder
     private var preview: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let image = message.imageUrl, let url = URL(string: image) {
+            if let url = RelayFormat.safeAttachmentURL(message.imageUrl) {
                 AsyncImage(url: url) { phase in
                     if let img = phase.image { img.resizable().scaledToFit() } else { ProgressView() }
                 }
                 .frame(maxHeight: 160)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
-            } else if let thumb = message.fileThumbnailUrl, let url = URL(string: thumb) {
+            } else if let url = RelayFormat.safeAttachmentURL(message.fileThumbnailUrl) {
                 AsyncImage(url: url) { phase in
                     if let img = phase.image { img.resizable().scaledToFit() } else { ProgressView() }
                 }

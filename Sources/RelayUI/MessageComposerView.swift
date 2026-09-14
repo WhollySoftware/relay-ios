@@ -44,6 +44,7 @@ public struct MessageComposerView: View {
     @State private var pendingAttachment: PendingAttachment?
     @State private var loadingAttachment = false
     @State private var dismissedPreviewUrl: String?
+    @State private var voiceRecorder = VoiceRecorderState()
 
     public init(conversationId: ConversationId, replyTo: Binding<Message?> = .constant(nil), editing: Binding<Message?> = .constant(nil)) {
         self.conversationId = conversationId
@@ -70,7 +71,7 @@ public struct MessageComposerView: View {
             }
             if let error { Text(error).font(.caption).foregroundStyle(theme.danger) }
             HStack(alignment: .bottom, spacing: 8) {
-                if editing == nil, client.modules.chatAttachments {
+                if editing == nil, !voiceRecorder.isRecording, client.modules.chatAttachments {
                     Button { showAttachMenu = true } label: { icons.attach.font(.system(size: 20)) }
                         .buttonStyle(.plain)
                         .foregroundStyle(theme.secondaryText)
@@ -83,23 +84,51 @@ public struct MessageComposerView: View {
                             Button("Cancel", role: .cancel) {}
                         }
                 }
-                TextField("Message…", text: $text, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.plain)
+                if voiceRecorder.isRecording {
+                    HStack(spacing: 6) {
+                        icons.voiceMessage.foregroundStyle(theme.danger)
+                        Text(RelayFormat.duration(voiceRecorder.elapsedSeconds)).monospacedDigit().foregroundStyle(theme.secondaryText)
+                        Spacer()
+                        Button("Cancel") { voiceRecorder.cancel() }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 18).fill(Color.gray.opacity(0.14)))
-                    .focused($focused)
-                    .onChange(of: text) { _, value in
-                        if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, editing == nil { client.chat.sendTyping(conversationId) }
-                    }
-                    .onSubmit { Task { await send() } }
-                Button { Task { await send() } } label: {
-                    (editing == nil ? icons.send : icons.confirm).font(.system(size: 30))
+                } else {
+                    TextField("Message…", text: $text, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 18).fill(Color.gray.opacity(0.14)))
+                        .focused($focused)
+                        .onChange(of: text) { _, value in
+                            if !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, editing == nil { client.chat.sendTyping(conversationId) }
+                        }
+                        .onSubmit { Task { await send() } }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(canSend ? theme.accent : theme.secondaryText)
-                .disabled(!canSend || busy)
-                .accessibilityLabel(editing == nil ? "Send" : "Save")
+                if voiceRecorder.isRecording {
+                    Button { if let clip = voiceRecorder.finish() { pendingAttachment = .audio(dataUrl: clip.dataUrl, durationSec: clip.durationSec) } } label: {
+                        icons.stopRecording.font(.system(size: 30))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.danger)
+                    .accessibilityLabel("Stop recording")
+                } else if editing == nil, !canSend, client.modules.chatVoiceMessages {
+                    Button { Task { await voiceRecorder.start() } } label: {
+                        icons.voiceMessage.font(.system(size: 22))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(theme.secondaryText)
+                    .accessibilityLabel("Record voice message")
+                } else {
+                    Button { Task { await send() } } label: {
+                        (editing == nil ? icons.send : icons.confirm).font(.system(size: 30))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(canSend ? theme.accent : theme.secondaryText)
+                    .disabled(!canSend || busy)
+                    .accessibilityLabel(editing == nil ? "Send" : "Save")
+                }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -156,6 +185,9 @@ public struct MessageComposerView: View {
                     (mime.hasPrefix("video/") ? icons.cameraOn : icons.document).frame(width: 44, height: 44)
                 }
                 Text(name).font(.caption).lineLimit(1)
+            case .audio(_, let durationSec):
+                icons.voiceMessage.frame(width: 28, height: 28)
+                Text("Voice message · \(RelayFormat.duration(durationSec))").font(.caption).foregroundStyle(theme.secondaryText)
             }
             Spacer()
             Button { pendingAttachment = nil } label: { icons.close }.buttonStyle(.plain).foregroundStyle(theme.secondaryText)
@@ -185,6 +217,8 @@ public struct MessageComposerView: View {
                 case .image(let dataUrl): input.imageUrl = dataUrl
                 case .file(let dataUrl, let name, _, let thumbnail, let durationSec):
                     input.fileUrl = dataUrl; input.fileName = name; input.fileThumbnailUrl = thumbnail; input.fileDurationSec = durationSec
+                case .audio(let dataUrl, let durationSec):
+                    input.audioUrl = dataUrl; input.audioDurationSec = durationSec
                 case nil: break
                 }
                 _ = try await client.chat.sendMessage(conversationId, input)
@@ -204,6 +238,7 @@ public struct MessageComposerView: View {
     private enum PendingAttachment: Equatable {
         case image(dataUrl: String)
         case file(dataUrl: String, name: String, mime: String, thumbnail: String?, durationSec: Int?)
+        case audio(dataUrl: String, durationSec: Int)
     }
 
     private func loadPickedPhoto(_ item: PhotosPickerItem) async {

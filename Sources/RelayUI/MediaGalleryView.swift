@@ -87,7 +87,7 @@ struct MediaGalleryView: View {
     private func mediaTile(_ m: Message) -> some View {
         let thumbUrl = m.imageUrl ?? m.fileThumbnailUrl
         ZStack {
-            if let thumbUrl, let url = URL(string: thumbUrl) {
+            if let url = RelayFormat.safeAttachmentURL(thumbUrl) {
                 AsyncImage(url: url) { phase in
                     if let image = phase.image {
                         image.resizable().scaledToFill()
