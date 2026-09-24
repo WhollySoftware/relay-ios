@@ -65,7 +65,7 @@ func conversationJSON(_ id: Int, peer: String = "bob", unread: Int = 0, lastMess
         "id": String(id), "isGroup": false, "name": NSNull(), "photoUrl": NSNull(), "creatorId": "alice",
         "peer": ["userId": peer, "displayName": peer.capitalized, "avatarUrl": NSNull(), "isOnline": false, "lastSeenAt": NSNull()],
         "members": [], "memberCount": 2, "lastMessage": lastMessage ?? NSNull(), "lastMessageAt": lastMessageAt ?? NSNull(),
-        "unreadCount": unread, "createdAt": createdAt,
+        "unreadCount": unread, "muted": false, "createdAt": createdAt,
     ]
 }
 

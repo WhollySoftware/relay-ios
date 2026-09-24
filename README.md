@@ -56,6 +56,33 @@ import RelayUI
 presence dots, unread badges, typing indicators, read receipts, optimistic sends with retry,
 edit/delete, replies, image and audio messages, and a reconnecting banner.
 
+## Static apps (no backend)
+
+No backend at all? `RelayToken.appKey` mints a token directly from the device
+using a restricted **appKey** (`ak_...`) instead of a backend calling
+`POST /users/token` with the project's `sk_` secret key:
+
+```swift
+let relay = RelayClient(config: RelayConfig(
+    baseURL: url, publicKey: "pk_…",
+    token: .appKey(AppKeyTokenOptions(baseURL: url, appKey: "ak_…", externalId: myDeviceId))
+))
+```
+
+Get an appKey from the admin panel, or server-to-server via
+`POST /projects/me/keys/:publicKey/app-key` with the secretKey (see
+`service/README.md`) — off by default, one per project key pair, revocable
+independently of the pair itself.
+
+**The tradeoff this accepts**: an appKey is safe to embed in a static app's
+bundle the same way a Firebase client config is — it can only ever mint a
+token, nothing else a secretKey can do — but Relay takes the app's word for
+`externalId` instead of a backend having authenticated the user first.
+Anyone extracting the appKey from the app can mint a token for any
+`externalId` in the project. Reach for a real backend + secretKey instead the
+moment the app has (or could have) one; appKey exists for the apps that
+genuinely never will — demos, prototypes, anonymous/guest chat, kiosk apps.
+
 ## Security
 
 The SDK sends `X-App-Bundle-Id` (from `Bundle.main.bundleIdentifier`) on every REST call and on
