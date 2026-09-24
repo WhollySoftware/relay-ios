@@ -153,7 +153,7 @@ public struct RelayCallView: View {
         ZStack {
             theme.callScrimStart.ignoresSafeArea()
             if showRemoteVideo, let remote = center.remoteVideoTrack {
-                VideoRenderView(track: remote).ignoresSafeArea()
+                RelayVideoView(track: remote).ignoresSafeArea()
             } else {
                 VStack(spacing: 14) {
                     Circle().fill(Color(hue: avatarHue(for: call.peerId), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 110, height: 110)
@@ -188,7 +188,7 @@ public struct RelayCallView: View {
                     HStack {
                         Spacer()
                         ZStack {
-                            VideoRenderView(track: local).opacity(center.cameraEnabled ? 1 : 0)
+                            RelayVideoView(track: local).opacity(center.cameraEnabled ? 1 : 0)
                             if !center.cameraEnabled {
                                 VStack(spacing: 4) {
                                     Circle().fill(Color(hue: avatarHue(for: center.client.userId ?? "you"), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 36, height: 36)
@@ -242,16 +242,25 @@ func avatarHue(for key: String) -> Double {
     return Double(h % 360) / 360
 }
 
+/// Renders a WebRTC video track — the same view `RelayCallView`/`GroupCallView` use for both local
+/// preview and remote video. Public so a fully custom call UI (see "Headless calling" in the
+/// package README) never has to reimplement WebRTC video rendering itself: pass
+/// `center.remoteVideoTrack` / `center.localVideoTrack` straight in. A `nil` track renders as an
+/// empty view — callers typically show their own avatar/placeholder instead in that case (see
+/// `RelayCallView`'s `showRemoteVideo` check for the pattern: don't mount this at all until there's
+/// a track and the peer's camera is actually enabled).
 #if os(iOS)
-struct VideoRenderView: UIViewRepresentable {
+public struct RelayVideoView: UIViewRepresentable {
     let track: RTCVideoTrack?
-    func makeUIView(context: Context) -> RTCMTLVideoView { let v = RTCMTLVideoView(); v.videoContentMode = .scaleAspectFill; return v }
-    func updateUIView(_ uiView: RTCMTLVideoView, context: Context) { track?.add(uiView) }
+    public init(track: RTCVideoTrack?) { self.track = track }
+    public func makeUIView(context: Context) -> RTCMTLVideoView { let v = RTCMTLVideoView(); v.videoContentMode = .scaleAspectFill; return v }
+    public func updateUIView(_ uiView: RTCMTLVideoView, context: Context) { track?.add(uiView) }
 }
 #else
-struct VideoRenderView: NSViewRepresentable {
+public struct RelayVideoView: NSViewRepresentable {
     let track: RTCVideoTrack?
-    func makeNSView(context: Context) -> RTCMTLNSVideoView { RTCMTLNSVideoView() }
-    func updateNSView(_ nsView: RTCMTLNSVideoView, context: Context) { track?.add(nsView) }
+    public init(track: RTCVideoTrack?) { self.track = track }
+    public func makeNSView(context: Context) -> RTCMTLNSVideoView { RTCMTLNSVideoView() }
+    public func updateNSView(_ nsView: RTCMTLNSVideoView, context: Context) { track?.add(nsView) }
 }
 #endif

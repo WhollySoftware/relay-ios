@@ -83,6 +83,48 @@ Anyone extracting the appKey from the app can mint a token for any
 moment the app has (or could have) one; appKey exists for the apps that
 genuinely never will — demos, prototypes, anonymous/guest chat, kiosk apps.
 
+### Connect at launch, not on first tap
+
+You don't need to (and shouldn't) mint a fresh token by hand or manage one yourself — `RelayClient`
+already does both of the things you'd otherwise build: it mints once and caches the result in
+memory for as long as the client lives (`TokenSource`, internal), and refreshes automatically only
+when the service says the current one has expired (~15 min) — a burst of requests hitting 401 at
+once still triggers exactly one refresh, not one per request. There's nothing to persist to disk
+yourself; token minting (via `.appKey` or a backend `tokenProvider`) is fast and works standalone,
+so re-minting per app launch is the right model, not a cache to maintain.
+
+The one thing worth doing yourself is calling `connect()` eagerly, right after creating the
+client, instead of waiting for the user to tap something — so the token is already minted and the
+realtime socket already open by the time they do:
+
+```swift
+@main struct MyApp: App {
+    let relay = RelayClient(config: RelayConfig(
+        baseURL: url, publicKey: "pk_…",
+        token: .appKey(AppKeyTokenOptions(baseURL: url, appKey: "ak_…", externalId: myDeviceId))
+    ))
+    let calls: CallCenter
+    init() { calls = CallCenter(client: relay) }
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .task { try? await relay.connect() }   // fire-and-forget at launch — connect()
+                                                          // is idempotent, so a call button that
+                                                          // also calls it (it does, internally)
+                                                          // never double-connects
+        }
+    }
+}
+```
+
+`CallCenter.start()`/`.answer()` already call `connect()` internally before doing anything else,
+so calling isn't actually broken without this — but without it, the very first tap pays for token
+mint + socket handshake before the call can even start ringing. Connecting at launch moves that
+cost earlier, off the critical path of the user's first tap. This applies identically whether the
+token comes from `.appKey` or your own backend's `tokenProvider` — it's not appKey-specific, just
+most worth doing for a calling-focused app where that first-tap latency is most visible.
+
 ## Security
 
 The SDK sends `X-App-Bundle-Id` (from `Bundle.main.bundleIdentifier`) on every REST call and on
@@ -181,6 +223,12 @@ carry `relay = "chat_message"`, `conversationId` and `messageId` for deep-linkin
 
 ## Headless (bring your own UI)
 
+`RelayChatView`/`RelayCallOverlay` are convenience views over `ChatStore`/`CallCenter` — both are
+ordinary `@Observable` classes, so building your own UI from scratch is a first-class path, not a
+workaround. You can mix the two: use the drop-in chat UI and a custom call screen, or vice versa.
+
+### Chat headless
+
 ```swift
 let relay = RelayClient(config: config)
 try await relay.connect()
@@ -195,6 +243,58 @@ Key `ChatStore` calls: `loadConversations(includeEmpty:)`, `openConversation(wit
 `createGroup(name:userIds:)`, `loadMessages(_:)`, `loadOlderMessages(_:)`, `sendMessage(_:_:)`,
 `retryMessage(_:clientId:)`, `editMessage`, `deleteMessage`, `markRead`, `sendTyping`,
 `setViewing(_:)`, plus `typing`, `readReceipts`, `presence`, `totalUnread`.
+
+### Calling headless
+
+`CallCenter` is `@Observable` too — a SwiftUI view that reads its properties re-renders itself on
+every state change with no extra plumbing, exactly like `RelayCallOverlay` does internally. Drive
+your own incoming/outgoing/in-call screens directly off it instead of mounting `RelayCallOverlay`:
+
+```swift
+let calls = CallCenter(client: relay)   // same instance either way — same one you'd hand RelayCallOverlay
+
+// Start / respond to a call — same three calls RelayCallOverlay's buttons use internally:
+calls.start(conversation: conversation, type: .video)   // from a thread header, 1:1 or group
+calls.answer()                                            // call.phase == .incoming
+calls.decline()
+calls.hangUp()
+
+// In-call controls:
+calls.toggleMic()
+calls.toggleCamera()
+calls.toggleSpeaker()
+calls.toggleLocalMute(for: participantId)   // group only — mutes what YOU hear from them, locally
+```
+
+State to read in your own views (all `@Observable`, so just read them — no delegate/callback to
+wire):
+
+- `calls.call: CallCenter.ActiveCall?` — `nil` when there's no call. `.phase` is one of `.outgoing`,
+  `.incoming`, `.connecting`, `.active`, `.reconnecting`; `.peerId`/`.peerName`, `.type` (`.audio`/
+  `.video`), `.isGroup`, `.participantIds`, `.startedAt` (for an elapsed-time display).
+- `calls.micEnabled` / `.cameraEnabled` / `.speakerEnabled` — your own local toggle state.
+- `calls.localVideoTrack` / `calls.remoteVideoTrack` (1:1) / `calls.remoteVideoTracks[userId]`
+  (group) — render with `RelayVideoView(track:)`, the same WebRTC video view `RelayCallView`/
+  `GroupCallView` use internally; you never need to touch `WebRTC` types directly.
+- `calls.remoteMicEnabled` / `.remoteCameraEnabled` (1:1), or `.remoteMicEnabledByUser` /
+  `.remoteCameraEnabledByUser: [UserId: Bool]` (group) — for a "muted"/camera-off indicator on the
+  other side.
+- `calls.localMicPermissionDenied` / `.localCameraPermissionDenied` — the call still connects and
+  is still fully audible/visible *to the other side* even when these are true; the call proceeds
+  either way, this only tells you whether to show your own "grant access" prompt.
+- `calls.callKitUnavailable` — true on the Simulator and in China-region builds, where CallKit
+  can't report calls natively. Check this yourself if you're not using `RelayCallOverlay`'s
+  automatic fallback — an incoming call still arrives in `calls.call`/`.phase == .incoming`, it
+  just won't ring through the system UI, so your own incoming-call screen is the only affordance
+  the user gets in that case.
+- `calls.errorMessage: String?` — short, user-facing text for a failed/dropped call (what
+  `RelayCallOverlay` shows in its toast). Set it to `nil` yourself once shown/dismissed.
+- `calls.lastFailureDetail: String?` — the underlying WebRTC state behind the last failure (e.g.
+  `"connect timeout (25s) — <peerId>: connecting"`), for your own logs/debug UI — not meant for
+  end users, and not localized.
+
+`RelayPushRegistry`/PushKit wiring (above) works identically regardless of which UI you use — it
+talks to `CallCenter`, not to `RelayCallOverlay`.
 
 ## App lifecycle
 

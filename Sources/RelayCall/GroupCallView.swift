@@ -3,7 +3,7 @@ import RelayCore
 @preconcurrency import WebRTC
 
 /// Group (mesh) call UI — one tile per entry in `remoteVideoTracks` plus a local preview, reusing
-/// `VideoRenderView` from RelayCallView for consistency. Kept as its own view (rather than folding
+/// `RelayVideoView` from RelayCallView for consistency. Kept as its own view (rather than folding
 /// isGroup branches into RelayCallView's body) so the 1:1 layout stays exactly as it was.
 struct GroupCallView: View {
     @Environment(\.relayTheme) private var theme
@@ -134,7 +134,7 @@ struct GroupCallView: View {
         let locallyMuted = center.locallyMutedUsers.contains(userId)
         Group {
             if let track, call.type == .video, cameraOn {
-                VideoRenderView(track: track)
+                RelayVideoView(track: track)
             } else {
                 theme.callScrimEnd.overlay {
                     Circle().fill(Color(hue: avatarHue(for: userId), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 56, height: 56)
@@ -163,7 +163,7 @@ struct GroupCallView: View {
             // back to the avatar — so this checks the permission flag too, not just "is there a
             // track."
             if call.type == .video, let local = center.localVideoTrack, center.cameraEnabled, !center.localCameraPermissionDenied {
-                VideoRenderView(track: local)
+                RelayVideoView(track: local)
             } else {
                 theme.callScrimEnd.overlay {
                     Circle().fill(Color(hue: avatarHue(for: center.client.userId ?? "you"), saturation: theme.avatarSaturation, brightness: theme.avatarLightness)).frame(width: 40, height: 40)

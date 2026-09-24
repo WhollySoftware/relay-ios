@@ -47,6 +47,10 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
 
     var onIceCandidate: (@Sendable (ICECandidatePayload) -> Void)?
     var onConnectionStateChange: (@Sendable (RTCPeerConnectionState) -> Void)?
+    // Finer-grained than onConnectionStateChange — ICE state moves through .checking/.disconnected/
+    // .failed independently of the aggregate RTCPeerConnectionState, and is the more useful of the
+    // two for telling "still negotiating" apart from "negotiation actually failed" in logs.
+    var onIceConnectionStateChange: (@Sendable (RTCIceConnectionState) -> Void)?
     var onRemoteVideoTrack: (@Sendable (RTCVideoTrack) -> Void)?
 
     fileprivate static let factory: RTCPeerConnectionFactory = {
@@ -186,6 +190,35 @@ final class PeerConnectionManager: NSObject, @unchecked Sendable {
     }
 }
 
+/// Readable names for the two WebRTC state machines that decide whether a call connects — used
+/// only in debug logs and `CallCenter.lastFailureDetail` (see CallCenter.swift), never in
+/// user-facing UI text.
+func describeIceState(_ state: RTCIceConnectionState) -> String {
+    switch state {
+    case .new: return "new"
+    case .checking: return "checking"
+    case .connected: return "connected"
+    case .completed: return "completed"
+    case .failed: return "failed"
+    case .disconnected: return "disconnected"
+    case .closed: return "closed"
+    case .count: return "count"
+    @unknown default: return "unknown(\(state.rawValue))"
+    }
+}
+
+func describeConnectionState(_ state: RTCPeerConnectionState) -> String {
+    switch state {
+    case .new: return "new"
+    case .connecting: return "connecting"
+    case .connected: return "connected"
+    case .disconnected: return "disconnected"
+    case .failed: return "failed"
+    case .closed: return "closed"
+    @unknown default: return "unknown(\(state.rawValue))"
+    }
+}
+
 extension PeerConnectionManager: RTCPeerConnectionDelegate {
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
@@ -195,7 +228,9 @@ extension PeerConnectionManager: RTCPeerConnectionDelegate {
     }
     func peerConnection(_ peerConnection: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
     func peerConnectionShouldNegotiate(_ peerConnection: RTCPeerConnection) {}
-    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
+    func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
+        onIceConnectionStateChange?(newState)
+    }
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
     func peerConnection(_ peerConnection: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
         onIceCandidate?(ICECandidatePayload(candidate: candidate.sdp, sdpMid: candidate.sdpMid, sdpMLineIndex: candidate.sdpMLineIndex))

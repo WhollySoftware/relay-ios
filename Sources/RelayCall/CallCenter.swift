@@ -68,6 +68,12 @@ public final class CallCenter: NSObject {
         peers[userId]?.setLocalMute(muted)
     }
     public var errorMessage: String?
+    /// The underlying WebRTC state at the moment a call failed — e.g. "peer connection: failed,
+    /// ice: disconnected". `errorMessage` stays a short user-facing string on purpose; this is the
+    /// detail to log or show in your own debug UI when a call fails and you need to tell "expected
+    /// network/Simulator limitation" apart from "something actually broke". Not localized, not
+    /// meant for end users. Cleared at the start of every call.
+    public private(set) var lastFailureDetail: String?
     /// True when the mic is not authorized (denied/restricted, or not-yet-determined and then
     /// denied when we prompted). Computed once, right around call start/answer — no live
     /// permission-change observer. The call proceeds regardless (WebRTC/AVFoundation just
@@ -208,6 +214,7 @@ public final class CallCenter: NSObject {
                 // POST /calls returns no participant list at all for a group call — participantIds
                 // must come from the conversation's own member list, derived above.
                 let displayPeerId = isGroup ? (myUserId ?? "") : (peer?.userId ?? "")
+                lastFailureDetail = nil
                 call = ActiveCall(id: res.callId, uuid: uuid, conversationId: conversation.id, peerId: isGroup ? displayPeerId : (peer?.userId ?? ""),
                                    peerName: isGroup ? conversation.title : peer?.displayName, type: type, phase: .outgoing,
                                    isGroup: isGroup, participantIds: isGroup ? groupParticipantIds : [peer?.userId ?? ""])
@@ -272,6 +279,7 @@ public final class CallCenter: NSObject {
     func handleInvite(callId: String, conversationId: ConversationId, callerId: UserId, callerName: String?, type: CallType, isGroup: Bool = false, participantIds: [UserId] = []) {
         guard callerId != myUserId, call == nil else { return }
         let uuid = UUID()
+        lastFailureDetail = nil
         call = ActiveCall(id: callId, uuid: uuid, conversationId: conversationId, peerId: callerId, peerName: callerName, type: type, phase: .incoming,
                            isGroup: isGroup, participantIds: participantIds)
         debugLog(client.config, "call \(callId) ringing (incoming)")
@@ -472,9 +480,16 @@ public final class CallCenter: NSObject {
                 if self.call?.isGroup == true { self.remoteVideoTracks[userId] = track } else { self.remoteVideoTrack = track }
             }
         }
+        m.onIceConnectionStateChange = { [weak self] iceState in
+            Task { @MainActor in
+                guard let self else { return }
+                debugLog(self.client.config, "call \(callId) peer \(userId) ice: \(describeIceState(iceState))")
+            }
+        }
         m.onConnectionStateChange = { [weak self] state in
             Task { @MainActor in
                 guard let self, self.peers[userId] === m, self.call?.id == callId else { return }
+                debugLog(self.client.config, "call \(callId) peer \(userId) connection: \(describeConnectionState(state))")
                 let isGroup = self.call?.isGroup == true
                 switch state {
                 case .connected:
@@ -553,7 +568,10 @@ public final class CallCenter: NSObject {
     private func connectionLost(callId: String, failed: Bool, manager: PeerConnectionManager) {
         guard var current = call, current.id == callId else { return }
         guard current.phase == .active || current.phase == .reconnecting else {
-            if failed, !manager.canRestartIce { failCall(callId, "Call failed to connect — check your network and try again.") }
+            if failed, !manager.canRestartIce {
+                let state = manager.connectionState.map(describeConnectionState) ?? "unknown"
+                failCall(callId, "Call failed to connect — check your network and try again.", detail: "peer connection: \(state) (ICE restart unavailable)")
+            }
             return
         }
         if current.phase == .active { current.phase = .reconnecting; call = current }
@@ -561,7 +579,8 @@ public final class CallCenter: NSObject {
             graceTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: Self.reconnectGrace * 1_000_000_000)
                 guard let self, !Task.isCancelled, self.call?.id == callId, self.call?.phase == .reconnecting else { return }
-                self.failCall(callId, "Call dropped — check your network and try again.")
+                let state = manager.connectionState.map(describeConnectionState) ?? "unknown"
+                self.failCall(callId, "Call dropped — check your network and try again.", detail: "peer connection: \(state) (reconnect grace period expired)")
             }
         }
         guard manager.canRestartIce else { return }
@@ -575,9 +594,11 @@ public final class CallCenter: NSObject {
         }
     }
 
-    private func failCall(_ callId: String, _ message: String) {
+    private func failCall(_ callId: String, _ message: String, detail: String? = nil) {
         Task { _ = try? await client.api.endCall(callId, reason: "failed") }
         errorMessage = message
+        lastFailureDetail = detail
+        if let detail { debugLog(client.config, "call \(callId) failed — \(detail)") }
         finish(failed: true)
     }
 
@@ -596,7 +617,13 @@ public final class CallCenter: NSObject {
         connectTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: Self.connectTimeout * 1_000_000_000)
             guard let self, !Task.isCancelled, self.call?.id == callId, self.call?.phase == .connecting else { return }
-            self.failCall(callId, "Call failed to connect — check your network and try again.")
+            // Whatever state the WebRTC peer connection(s) got stuck in by the connect timeout —
+            // e.g. "connecting" here almost always means ICE never found a working candidate pair
+            // (common on a Simulator, which has no real network stack for two local instances to
+            // negotiate over; rare on physical devices unless the network genuinely blocks it).
+            let states = self.peers.map { "\($0.key): \($0.value.connectionState.map(describeConnectionState) ?? "unknown")" }
+            let detail = "connect timeout (\(Int(Self.connectTimeout))s) — " + (states.isEmpty ? "no peer connection" : states.joined(separator: ", "))
+            self.failCall(callId, "Call failed to connect — check your network and try again.", detail: detail)
         }
     }
 
